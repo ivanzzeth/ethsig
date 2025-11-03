@@ -734,3 +734,17 @@ func TestSignTransactionWithHashSigner(t *testing.T) {
 		t.Errorf("Nonce mismatch. Expected: %d, Got: %d", tx.Nonce(), signedTx.Nonce())
 	}
 }
+
+// TestEthPrivateKeySignerWithSpecTest uses the unified SpecTest pattern to test EthPrivateKeySigner
+// This ensures that EthPrivateKeySigner properly implements all interfaces
+func TestEthPrivateKeySignerWithSpecTest(t *testing.T) {
+	signer, err := NewEthPrivateKeySignerFromPrivateKeyHex(testPrivateKeyHex)
+	if err != nil {
+		t.Fatalf("Failed to create signer: %v", err)
+	}
+
+	address := signer.GetAddress()
+
+	// Run comprehensive SpecTest for all interfaces
+	SpecTestAllInterfaces(t, signer, address)
+}
