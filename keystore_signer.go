@@ -183,7 +183,18 @@ func (s *KeystoreSigner) PersonalSign(data string) ([]byte, error) {
 	hash := crypto.Keccak256Hash(prefixedMessage)
 
 	// Sign using the keystore
-	return s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	
+	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
+	// We need to adjust it to Ethereum's [27,28] range
+	if len(signature) == 65 && signature[64] < 27 {
+		signature[64] += 27
+	}
+	
+	return signature, nil
 }
 
 // SignEIP191Message signs an EIP-191 formatted message
@@ -197,13 +208,35 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 
 	// For EIP-191 messages, we sign the raw message bytes
 	hash := crypto.Keccak256Hash(messageBytes)
-	return s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	
+	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
+	// We need to adjust it to Ethereum's [27,28] range
+	if len(signature) == 65 && signature[64] < 27 {
+		signature[64] += 27
+	}
+	
+	return signature, nil
 }
 
 // SignRawMessage signs raw message bytes
 func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 	hash := crypto.Keccak256Hash(raw)
-	return s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	
+	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
+	// We need to adjust it to Ethereum's [27,28] range
+	if len(signature) == 65 && signature[64] < 27 {
+		signature[64] += 27
+	}
+	
+	return signature, nil
 }
 
 // SignHash signs the hashed data using the private key
