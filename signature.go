@@ -30,7 +30,7 @@ type RSV struct {
 //	V: 28
 func ConvertSigBytes2RSV(sig []byte) (r [32]byte, s [32]byte, v uint8, err error) {
 	if len(sig) != 65 {
-		err = fmt.Errorf("invalid signature length: expected 65 bytes, got %d", len(sig))
+		err = NewSignatureError("invalid signature length", fmt.Errorf("expected 65 bytes, got %d", len(sig)))
 		return
 	}
 
@@ -70,7 +70,7 @@ func ConvertSigHex2RSV(sigHex string) (r [32]byte, s [32]byte, v uint8, err erro
 	// Decode hex string to bytes
 	sig, err := hex.DecodeString(sigHex)
 	if err != nil {
-		err = fmt.Errorf("failed to decode hex signature: %w", err)
+		err = NewSignatureError("failed to decode hex signature", err)
 		return
 	}
 

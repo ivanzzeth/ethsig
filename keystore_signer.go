@@ -46,7 +46,7 @@ type KeystoreSigner struct {
 //   - error: Any error that occurred during loading or decryption
 func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 	if keystorePath == "" {
-		return nil, fmt.Errorf("keystore path cannot be empty")
+		return nil, NewKeystoreError("keystore path cannot be empty", nil)
 	}
 
 	// Get the directory containing the keystore file
@@ -69,7 +69,7 @@ func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 	}
 	
 	if !found {
-		return nil, fmt.Errorf("keystore file not found in directory: %s", keystorePath)
+		return nil, NewKeystoreError("keystore file not found in directory", fmt.Errorf("%s", keystorePath))
 	}
 
 	// Get the address from the account
@@ -97,7 +97,7 @@ func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 //   - error: Any error that occurred during loading or decryption
 func NewKeystoreSignerFromDirectory(keystoreDir, password string) (*KeystoreSigner, error) {
 	if keystoreDir == "" {
-		return nil, fmt.Errorf("keystore directory cannot be empty")
+		return nil, NewKeystoreError("keystore directory cannot be empty", nil)
 	}
 
 	// List all files in the directory
@@ -116,7 +116,7 @@ func NewKeystoreSignerFromDirectory(keystoreDir, password string) (*KeystoreSign
 	}
 
 	if keystoreFile == "" {
-		return nil, fmt.Errorf("no keystore files found in directory")
+		return nil, NewKeystoreError("no keystore files found in directory", nil)
 	}
 
 	return NewKeystoreSigner(keystoreFile, password)
@@ -133,12 +133,12 @@ func NewKeystoreSignerFromDirectory(keystoreDir, password string) (*KeystoreSign
 //   - error: Any error that occurred during creation
 func CreateKeystore(keystoreDir, password string) (*KeystoreSigner, string, error) {
 	if keystoreDir == "" {
-		return nil, "", fmt.Errorf("keystore directory cannot be empty")
+		return nil, "", NewKeystoreError("keystore directory cannot be empty", nil)
 	}
 
 	// Create the keystore directory if it doesn't exist
 	if err := os.MkdirAll(keystoreDir, 0700); err != nil {
-		return nil, "", fmt.Errorf("failed to create keystore directory: %w", err)
+		return nil, "", NewKeystoreError("failed to create keystore directory", err)
 	}
 
 	// Create a new keystore
@@ -147,7 +147,7 @@ func CreateKeystore(keystoreDir, password string) (*KeystoreSigner, string, erro
 	// Create a new account
 	account, err := ks.NewAccount(password)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create new account: %w", err)
+		return nil, "", NewKeystoreError("failed to create new account", err)
 	}
 
 	// Create the signer using the keystore
@@ -281,7 +281,7 @@ func (s *KeystoreSigner) SignTransactionWithChainID(tx *types.Transaction, chain
 // Note: With the current keystore-based implementation, we cannot directly export the private key
 // as the keystore doesn't provide a method to extract the private key in plain text.
 func (s *KeystoreSigner) ExportPrivateKey() (string, error) {
-	return "", fmt.Errorf("private key export not supported with keystore-based implementation")
+	return "", NewKeystoreError("private key export not supported with keystore-based implementation", nil)
 }
 
 // Close securely cleans up sensitive data from memory
@@ -299,12 +299,12 @@ func createTestKeystore(keystoreDir, password string) (string, common.Address, e
 	// Generate a new private key
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
-		return "", common.Address{}, fmt.Errorf("failed to generate private key: %w", err)
+		return "", common.Address{}, NewKeystoreError("failed to generate private key", err)
 	}
 
 	// Create the keystore directory if it doesn't exist
 	if err := os.MkdirAll(keystoreDir, 0700); err != nil {
-		return "", common.Address{}, fmt.Errorf("failed to create keystore directory: %w", err)
+		return "", common.Address{}, NewKeystoreError("failed to create keystore directory", err)
 	}
 
 	// Create a new keystore
@@ -313,7 +313,7 @@ func createTestKeystore(keystoreDir, password string) (string, common.Address, e
 	// Import the private key
 	account, err := ks.ImportECDSA(privateKey, password)
 	if err != nil {
-		return "", common.Address{}, fmt.Errorf("failed to import private key: %w", err)
+		return "", common.Address{}, NewKeystoreError("failed to import private key", err)
 	}
 
 	address := crypto.PubkeyToAddress(privateKey.PublicKey)

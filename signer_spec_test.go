@@ -25,7 +25,7 @@ func SpecTestHashSigner(t *testing.T, signer HashSigner, address common.Address)
 			{"short message", "test", true},
 			{"long message", "this is a longer test message for hash signing", true},
 			{"special characters", "test!@#$%^&*()_+-=[]{}|;:,.<>?", true},
-			{"unicode characters", "Hello 世界 🌍", true},
+			{"unicode characters", "Hello World 🌍", true},
 			{"very long message", string(make([]byte, 10000)), true}, // 10KB message
 		}
 
@@ -221,7 +221,7 @@ func SpecTestPersonalSigner(t *testing.T, signer PersonalSigner, address common.
 			{"simple message", "Hello, Ethereum!", true},
 			{"long message", "This is a much longer test message for personal signing functionality verification", true},
 			{"special characters", "Message with !@#$%^&*() symbols", true},
-			{"unicode", "Hello 世界 🌍", true},
+			{"unicode", "Hello World 🌍", true},
 			{"very long message", string(make([]byte, 5000)), true}, // 5KB message
 			{"newline characters", "Line 1\nLine 2\nLine 3", true},
 			{"tab characters", "Tab\tSeparated\tValues", true},

@@ -2,7 +2,6 @@ package ethsig
 
 import (
 	"crypto/ecdsa"
-	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -99,11 +98,11 @@ func (s *EthPrivateKeySigner) GetAddress() common.Address {
 //   - chainID: The explicit chain ID to use for signing (e.g., 137 for Polygon)
 func (s *EthPrivateKeySigner) SignTransactionWithChainID(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
 	if tx == nil {
-		return nil, fmt.Errorf("transaction is nil")
+		return nil, NewTransactionError("transaction is nil", nil)
 	}
 
 	if chainID == nil {
-		return nil, fmt.Errorf("chainID is nil")
+		return nil, NewTransactionError("chainID is nil", nil)
 	}
 
 	// Create a signer using LatestSignerForChainID which automatically selects
@@ -114,7 +113,7 @@ func (s *EthPrivateKeySigner) SignTransactionWithChainID(tx *types.Transaction, 
 	// Sign the transaction
 	signedTx, err := types.SignTx(tx, signer, s.privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign transaction: %w", err)
+		return nil, NewTransactionError("failed to sign transaction", err)
 	}
 
 	return signedTx, nil

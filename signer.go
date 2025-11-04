@@ -1,7 +1,6 @@
 package ethsig
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -11,9 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ivanzzeth/ethsig/eip712"
 )
-
-var ErrInvalidSignatureLen = errors.New("invalid signature length")
-var ErrInvalidEIP191MessagePrefix = errors.New("invalid EIP191 message prefix")
 
 type AddressGetter interface {
 	// GetAddress returns the address associated with this signer
@@ -69,7 +65,7 @@ func SignEIP191Message(signer any, message string) ([]byte, error) {
 		return SignEIP191MessageWithRawMessageSigner(rawSigner, message)
 	}
 
-	return nil, fmt.Errorf("signer does not implement EIP191Signer")
+	return nil, NewSignerError("signer does not implement EIP191Signer", nil)
 }
 
 // SignEIP191MessageWithExactSigner is a helper function that signs an EIP-191 formatted message
@@ -114,7 +110,7 @@ func PersonalSign(signer any, data string) ([]byte, error) {
 		return PersonalSignWithHash(raw, data)
 	}
 
-	return nil, fmt.Errorf("signer does not implement PersonalSigner, EIP191Signer, or HashSigner")
+	return nil, NewSignerError("signer does not implement PersonalSigner, EIP191Signer, or HashSigner", nil)
 }
 
 // PersonalSignWithHash implements personal_sign using a HashSigner (hash-based approach)
@@ -178,7 +174,7 @@ func SignTypedData(signer any, typedData eip712.TypedData) ([]byte, error) {
 		return SignTypedDataWithHash(raw, typedData)
 	}
 
-	return nil, fmt.Errorf("signer does not implement TypedDataSigner, EIP191Signer, or HashSigner")
+	return nil, NewSignerError("signer does not implement TypedDataSigner, EIP191Signer, or HashSigner", nil)
 }
 
 // SignTypedDataWithHash implements EIP-712 signing using a HashSigner
@@ -186,12 +182,12 @@ func SignTypedData(signer any, typedData eip712.TypedData) ([]byte, error) {
 func SignTypedDataWithHash(signer HashSigner, typedData eip712.TypedData) ([]byte, error) {
 	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash domain: %w", err)
+		return nil, NewEIP712Error("failed to hash domain", err)
 	}
 
 	typedDataHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash message: %w", err)
+		return nil, NewEIP712Error("failed to hash message", err)
 	}
 
 	// Create EIP-191 version 0x01 message
@@ -200,7 +196,7 @@ func SignTypedDataWithHash(signer HashSigner, typedData eip712.TypedData) ([]byt
 
 	signature, err := signer.SignHash(digest)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign: %w", err)
+		return nil, NewSignatureError("failed to sign", err)
 	}
 
 	return signature, nil
@@ -211,12 +207,12 @@ func SignTypedDataWithHash(signer HashSigner, typedData eip712.TypedData) ([]byt
 func SignTypedDataWithEIP191(signer EIP191Signer, typedData eip712.TypedData) ([]byte, error) {
 	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash domain: %w", err)
+		return nil, NewEIP712Error("failed to hash domain", err)
 	}
 
 	typedDataHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash message: %w", err)
+		return nil, NewEIP712Error("failed to hash message", err)
 	}
 
 	// Create EIP-191 version 0x01 message
@@ -224,7 +220,7 @@ func SignTypedDataWithEIP191(signer EIP191Signer, typedData eip712.TypedData) ([
 
 	signature, err := signer.SignEIP191Message(string(rawData))
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign: %w", err)
+		return nil, NewSignatureError("failed to sign", err)
 	}
 
 	return signature, nil
@@ -242,11 +238,11 @@ func SignTransactionWithExactSigner(signer TransactionSigner, tx *types.Transact
 // IMPORTANT: Always uses the provided chainID for signing, NOT tx.ChainId()
 func SignTransactionWithHashSigner(signer HashSigner, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
 	if tx == nil {
-		return nil, fmt.Errorf("transaction is nil")
+		return nil, NewTransactionError("transaction is nil", nil)
 	}
 
 	if chainID == nil {
-		return nil, fmt.Errorf("chainID is nil")
+		return nil, NewTransactionError("chainID is nil", nil)
 	}
 
 	// Create a signer using LatestSignerForChainID which automatically selects
@@ -263,7 +259,7 @@ func SignTransactionWithHashSigner(signer HashSigner, tx *types.Transaction, cha
 	// Sign the hash using HashSigner
 	signature, err := signer.SignHash(txHash)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign transaction hash: %w", err)
+		return nil, NewTransactionError("failed to sign transaction hash", err)
 	}
 
 	// Adjust V value back to 0/1 for WithSignature (it expects 0/1, not 27/28)
@@ -274,7 +270,7 @@ func SignTransactionWithHashSigner(signer HashSigner, tx *types.Transaction, cha
 	// Create signed transaction using the signature
 	signedTx, err := tx.WithSignature(txSigner, signature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to apply signature to transaction: %w", err)
+		return nil, NewTransactionError("failed to apply signature to transaction", err)
 	}
 
 	return signedTx, nil
@@ -297,7 +293,7 @@ func SignTransaction(signer any, tx *types.Transaction, chainID *big.Int) (*type
 		return SignTransactionWithHashSigner(raw, tx, chainID)
 	}
 
-	return nil, fmt.Errorf("signer does not implement TransactionSigner or HashSigner")
+	return nil, NewSignerError("signer does not implement TransactionSigner or HashSigner", nil)
 }
 
 // NewBindSignerFn creates a bind.SignerFn from a TransactionSigner
@@ -322,19 +318,19 @@ func SignTransaction(signer any, tx *types.Transaction, chainID *big.Int) (*type
 //	}
 func NewBindSignerFn(txSigner any, chainID *big.Int) (bind.SignerFn, error) {
 	if chainID == nil {
-		return nil, fmt.Errorf("chainID is nil")
+		return nil, NewTransactionError("chainID is nil", nil)
 	}
 
 	// Get the authorized address from the signer
 	authorizedAddress, err := GetAddress(txSigner)
 	if err != nil {
-		return nil, fmt.Errorf("signer does not implement AddressGetter: %w", err)
+		return nil, NewSignerError("signer does not implement AddressGetter", err)
 	}
 
 	return func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
 		// Verify the address matches the authorized address
 		if address != authorizedAddress {
-			return nil, fmt.Errorf("not authorized to sign for address %s (expected %s)", address.Hex(), authorizedAddress.Hex())
+			return nil, NewAuthorizationError("not authorized to sign for address", fmt.Errorf("address %s (expected %s)", address.Hex(), authorizedAddress.Hex()))
 		}
 
 		// Use SignTransaction to handle both TransactionSigner and HashSigner
@@ -357,5 +353,5 @@ func GetAddress(signer any) (common.Address, error) {
 		return ag.GetAddress(), nil
 	}
 
-	return common.Address{}, fmt.Errorf("signer does not implement AddressGetter")
+	return common.Address{}, NewSignerError("signer does not implement AddressGetter", nil)
 }
