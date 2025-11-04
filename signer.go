@@ -267,7 +267,7 @@ func SignTransactionWithHashSigner(signer HashSigner, tx *types.Transaction, cha
 	}
 
 	// Adjust V value back to 0/1 for WithSignature (it expects 0/1, not 27/28)
-	if signature[64] >= 27 {
+	if len(signature) == 65 && signature[64] >= 27 {
 		signature[64] -= 27
 	}
 

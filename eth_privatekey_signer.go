@@ -67,8 +67,7 @@ func (s *EthPrivateKeySigner) SignHash(hashedData common.Hash) ([]byte, error) {
 	}
 
 	// Adjust V value for Ethereum signatures (27 or 28)
-	sign[64] += 27
-	return sign, err
+	return NormalizeSignatureV(sign), err
 }
 
 // SignTypedData implements EIP-712 typed data signing

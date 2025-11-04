@@ -1,7 +1,7 @@
 package ethsig
 
 import (
-	"bytes"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -120,6 +120,40 @@ func NormalizeV(v uint8) uint8 {
 	return v
 }
 
+// NormalizeSignatureV normalizes the V value in a signature to the standard format (27 or 28)
+// This function safely handles the signature and returns a normalized copy
+func NormalizeSignatureV(signature []byte) []byte {
+	if len(signature) != 65 {
+		return signature
+	}
+	
+	if signature[64] < 27 {
+		sigCopy := make([]byte, 65)
+		copy(sigCopy, signature)
+		sigCopy[64] += 27
+		return sigCopy
+	}
+	
+	return signature
+}
+
+// DenormalizeSignatureV converts V from 27/28 to 0/1 format in a signature
+// This function safely handles the signature and returns a denormalized copy
+func DenormalizeSignatureV(signature []byte) []byte {
+	if len(signature) != 65 {
+		return signature
+	}
+	
+	if signature[64] >= 27 {
+		sigCopy := make([]byte, 65)
+		copy(sigCopy, signature)
+		sigCopy[64] -= 27
+		return sigCopy
+	}
+	
+	return signature
+}
+
 // DenormalizeV converts V from 27/28 to 0/1 format
 // This is useful for some contract interactions that expect 0/1
 func DenormalizeV(v uint8) uint8 {
@@ -164,16 +198,12 @@ func FormatSignatureHex(r [32]byte, s [32]byte, v uint8) string {
 }
 
 func ValidateSignature(signer common.Address, hashedData common.Hash, signature []byte) (bool, error) {
-	sigCopy := make([]byte, len(signature))
-	copy(sigCopy, signature)
-
-	if len(sigCopy) != 65 {
+	if len(signature) != 65 {
 		return false, ErrInvalidSignatureLen
 	}
 
-	if sigCopy[64] != 0 && sigCopy[64] != 1 { // in case of ledger signing v might already be 0 or 1
-		sigCopy[64] -= 27 // Transform V from 27/28 to 0/1 according to the yellow paper
-	}
+	// Use the safe denormalization function
+	sigCopy := DenormalizeSignatureV(signature)
 
 	sigPublicKey, err := crypto.Ecrecover(hashedData.Bytes(), sigCopy)
 	if err != nil {
@@ -186,5 +216,6 @@ func ValidateSignature(signer common.Address, hashedData common.Hash, signature 
 	}
 
 	recoveredAddress := crypto.PubkeyToAddress(*recoveredPublicKey)
-	return bytes.Equal(signer.Bytes(), recoveredAddress.Bytes()), nil
+	// Use constant-time comparison to prevent timing attacks
+	return subtle.ConstantTimeCompare(signer.Bytes(), recoveredAddress.Bytes()) == 1, nil
 }

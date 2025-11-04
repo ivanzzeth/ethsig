@@ -3,6 +3,10 @@ package ethsig
 import (
 	"bytes"
 	"fmt"
+	"math/big"
+	"strconv"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func ValidateEIP191Message(message []byte) error {
@@ -38,13 +42,69 @@ func ValidateEIP191Message(message []byte) error {
 		if !bytes.HasPrefix(message, expectedPrefix) {
 			return fmt.Errorf("invalid EIP-191 version 0x45 message: missing 'Ethereum Signed Message:' prefix")
 		}
-		// The message must contain at least the prefix plus length indicator
-		if len(message) <= len(expectedPrefix) {
-			return fmt.Errorf("invalid EIP-191 version 0x45 message: no message length found")
+		
+		// Extract the length part after the prefix
+		lengthPart := message[len(expectedPrefix):]
+		
+		// Find the newline that separates length from message
+		newlinePos := bytes.IndexByte(lengthPart, '\n')
+		if newlinePos == -1 {
+			return fmt.Errorf("invalid EIP-191 version 0x45 message: no newline found after length")
 		}
+		
+		// Parse the length
+		lengthStr := string(lengthPart[:newlinePos])
+		expectedLength, err := strconv.Atoi(lengthStr)
+		if err != nil {
+			return fmt.Errorf("invalid EIP-191 version 0x45 message: invalid length format: %w", err)
+		}
+		
+		// Calculate where the message should start
+		messageStart := len(expectedPrefix) + newlinePos + 1
+		
+		// Verify the actual message length matches the declared length
+		actualLength := len(message) - messageStart
+		if actualLength != expectedLength {
+			return fmt.Errorf("invalid EIP-191 version 0x45 message: declared length %d, actual length %d", expectedLength, actualLength)
+		}
+		
 		return nil
 
 	default:
 		return fmt.Errorf("unsupported EIP-191 version byte: 0x%02x", message[1])
 	}
+}
+
+// ValidateSignatureLength validates that a signature has the correct length
+func ValidateSignatureLength(signature []byte) error {
+	if len(signature) != 65 {
+		return fmt.Errorf("invalid signature length: expected 65 bytes, got %d", len(signature))
+	}
+	return nil
+}
+
+// ValidateAddress validates that an address is a valid Ethereum address
+func ValidateAddress(address common.Address) error {
+	if address == (common.Address{}) {
+		return fmt.Errorf("address is zero address")
+	}
+	
+	if !common.IsHexAddress(address.Hex()) {
+		return fmt.Errorf("invalid Ethereum address format: %s", address.Hex())
+	}
+	
+	return nil
+}
+
+// ValidateChainID validates that a chain ID is valid
+func ValidateChainID(chainID *big.Int) error {
+	if chainID == nil {
+		return fmt.Errorf("chainID is nil")
+	}
+	
+	if chainID.Sign() <= 0 {
+		return fmt.Errorf("chainID must be positive")
+	}
+	
+	return nil
 }

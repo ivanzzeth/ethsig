@@ -33,7 +33,7 @@ type KeystoreSigner struct {
 	address          common.Address
 	keyStore         *keystore.KeyStore
 	account          accounts.Account
-	password         string
+	password         *SecureBytes
 }
 
 // NewKeystoreSigner creates a new KeystoreSigner instance by loading a private key from a keystore file
@@ -49,31 +49,29 @@ func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 		return nil, fmt.Errorf("keystore path cannot be empty")
 	}
 
-	// Read the keystore file
-	keystoreBytes, err := os.ReadFile(keystorePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read keystore file: %w", err)
-	}
-
-	// Create a temporary keystore manager to decrypt the key
-	// We use a temporary directory since we only need to decrypt one key
-	tempDir, err := os.MkdirTemp("", "ethsig-keystore-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	ks := keystore.NewKeyStore(tempDir, keystore.StandardScryptN, keystore.StandardScryptP)
-
-	// Import the key from the keystore file
-	account, err := ks.Import(keystoreBytes, password, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to import keystore: %w", err)
-	}
-
-	// Instead of trying to extract the private key directly, we'll use the keystore's signing capabilities
-	// and create a wrapper that delegates to the keystore for signing operations
+	// Get the directory containing the keystore file
+	keystoreDir := filepath.Dir(keystorePath)
 	
+	// Create a keystore manager in the same directory as the keystore file
+	ks := keystore.NewKeyStore(keystoreDir, keystore.StandardScryptN, keystore.StandardScryptP)
+
+	// Find the account in the keystore
+	accountList := ks.Accounts()
+	var account accounts.Account
+	found := false
+	
+	for _, acc := range accountList {
+		if acc.URL.Path == keystorePath {
+			account = acc
+			found = true
+			break
+		}
+	}
+	
+	if !found {
+		return nil, fmt.Errorf("keystore file not found in directory: %s", keystorePath)
+	}
+
 	// Get the address from the account
 	address := account.Address
 
@@ -84,7 +82,7 @@ func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 		address:          address,
 		keyStore:         ks,
 		account:          account,
-		password:         password,
+		password:         NewSecureBytesFromString(password),
 	}, nil
 }
 
@@ -159,7 +157,7 @@ func CreateKeystore(keystoreDir, password string) (*KeystoreSigner, string, erro
 		address:          account.Address,
 		keyStore:         ks,
 		account:          account,
-		password:         password,
+		password:         NewSecureBytesFromString(password),
 	}
 
 	return signer, account.URL.Path, nil
@@ -183,18 +181,14 @@ func (s *KeystoreSigner) PersonalSign(data string) ([]byte, error) {
 	hash := crypto.Keccak256Hash(prefixedMessage)
 
 	// Sign using the keystore
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash.Bytes())
 	if err != nil {
 		return nil, err
 	}
 	
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
-	if len(signature) == 65 && signature[64] < 27 {
-		signature[64] += 27
-	}
-	
-	return signature, nil
+	return NormalizeSignatureV(signature), nil
 }
 
 // SignEIP191Message signs an EIP-191 formatted message
@@ -208,7 +202,7 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 
 	// For EIP-191 messages, we sign the raw message bytes
 	hash := crypto.Keccak256Hash(messageBytes)
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +219,7 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 // SignRawMessage signs raw message bytes
 func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 	hash := crypto.Keccak256Hash(raw)
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hash.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +235,7 @@ func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 
 // SignHash signs the hashed data using the private key
 func (s *KeystoreSigner) SignHash(hashedData common.Hash) ([]byte, error) {
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, s.password, hashedData.Bytes())
+	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hashedData.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +273,7 @@ func (s *KeystoreSigner) SignTransactionWithChainID(tx *types.Transaction, chain
 		return nil, fmt.Errorf("chainID is nil")
 	}
 
-	return s.keyStore.SignTxWithPassphrase(s.account, s.password, tx, chainID)
+	return s.keyStore.SignTxWithPassphrase(s.account, string(s.password.Bytes()), tx, chainID)
 }
 
 // ExportPrivateKey exports the private key in hex format
@@ -288,6 +282,15 @@ func (s *KeystoreSigner) SignTransactionWithChainID(tx *types.Transaction, chain
 // as the keystore doesn't provide a method to extract the private key in plain text.
 func (s *KeystoreSigner) ExportPrivateKey() (string, error) {
 	return "", fmt.Errorf("private key export not supported with keystore-based implementation")
+}
+
+// Close securely cleans up sensitive data from memory
+// This should be called when the signer is no longer needed
+func (s *KeystoreSigner) Close() {
+	if s.password != nil {
+		s.password.Zeroize()
+		s.password = nil
+	}
 }
 
 // createTestKeystore creates a test keystore file for testing purposes
