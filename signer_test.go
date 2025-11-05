@@ -594,3 +594,86 @@ func TestSigner_InterfaceCompleteness(t *testing.T) {
 
 	t.Log("✓ Signer implements all required interfaces")
 }
+
+// TestSignerClose tests the Close method of Signer
+func TestSignerClose(t *testing.T) {
+	t.Run("Close_WithKeystoreSigner", func(t *testing.T) {
+		// Create a temporary keystore for testing
+		keystoreDir := t.TempDir()
+		password := "test-password-123"
+
+		keystorePath, _, err := createTestKeystore(keystoreDir, password)
+		if err != nil {
+			t.Fatalf("Failed to create test keystore: %v", err)
+		}
+
+		// Create keystore signer
+		keystoreSigner, err := NewKeystoreSigner(keystorePath, password, nil)
+		if err != nil {
+			t.Fatalf("Failed to create keystore signer: %v", err)
+		}
+
+		// Wrap with Signer
+		signer := NewSigner(keystoreSigner)
+
+		// Call Close - should delegate to underlying KeystoreSigner.Close()
+		err = signer.Close()
+		if err != nil {
+			t.Errorf("Close returned error: %v", err)
+		}
+
+		// Verify that the underlying keystore signer was closed
+		// After Close(), the password should be zeroized
+		if keystoreSigner.password != nil {
+			t.Error("KeystoreSigner password was not zeroized after Close()")
+		}
+
+		t.Log("✓ Signer.Close() successfully delegated to KeystoreSigner.Close()")
+	})
+
+	t.Run("Close_WithEthPrivateKeySigner", func(t *testing.T) {
+		// Create eth private key signer
+		ethSigner, err := NewEthPrivateKeySignerFromPrivateKeyHex(testPrivateKeyHex)
+		if err != nil {
+			t.Fatalf("Failed to create eth signer: %v", err)
+		}
+
+		// Wrap with Signer
+		signer := NewSigner(ethSigner)
+
+		// Call Close - EthPrivateKeySigner doesn't have Close method, should not error
+		err = signer.Close()
+		if err != nil {
+			t.Errorf("Close returned error for signer without Close method: %v", err)
+		}
+
+		t.Log("✓ Signer.Close() handled signer without Close method gracefully")
+	})
+
+	t.Run("Close_WithCustomSigner", func(t *testing.T) {
+		// Create a custom signer with Close method
+		customWithClose := &testSignerWithClose{}
+		signer := NewSigner(customWithClose)
+
+		// Call Close
+		err := signer.Close()
+		if err != nil {
+			t.Errorf("Close returned error: %v", err)
+		}
+
+		if !customWithClose.closed {
+			t.Error("Custom signer's Close method was not called")
+		}
+
+		t.Log("✓ Signer.Close() successfully delegated to custom Close() method")
+	})
+}
+
+// testSignerWithClose is a helper type for testing Close method
+type testSignerWithClose struct {
+	closed bool
+}
+
+func (s *testSignerWithClose) Close() {
+	s.closed = true
+}

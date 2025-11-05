@@ -115,6 +115,33 @@ func (s *Signer) SignTransactionWithChainID(tx *types.Transaction, chainID *big.
 	return SignTransaction(s.signer, tx, chainID)
 }
 
+// Close securely cleans up sensitive data from memory
+// This method checks if the underlying signer implements a Close() method and calls it
+// It should be called when the signer is no longer needed
+func (s *Signer) Close() error {
+	// Check if underlying signer has Close method
+	type closer interface {
+		Close()
+	}
+
+	if c, ok := s.signer.(closer); ok {
+		c.Close()
+		return nil
+	}
+
+	// Check for Close method with error return
+	type closerWithError interface {
+		Close() error
+	}
+
+	if c, ok := s.signer.(closerWithError); ok {
+		return c.Close()
+	}
+
+	// No Close method - nothing to do
+	return nil
+}
+
 // SignHash flexibly signs hashed data using the most appropriate method based on signer type
 // It accepts any signer type and automatically chooses the best implementation:
 // - If signer implements HashSigner, use SignHash directly
