@@ -15,13 +15,6 @@ A comprehensive Ethereum signature library for Go, providing secure signing oper
   - EIP-712 typed structured data
   - Ethereum transaction signing
 
-- **Advanced Whitelist System**
-  - Transaction whitelisting with method and recipient filtering
-  - Parameter value constraints for function calls
-  - EIP-712 field value constraints
-  - Pattern matching and numeric range validation
-  - Audit logging with detailed operation tracking
-
 - **Security Features**
   - Secure memory handling for sensitive data
   - Configurable encryption strength
@@ -61,84 +54,6 @@ See [examples/eip712_signing/main.go](examples/eip712_signing/main.go) for a com
 ### Transaction Signing
 
 See [examples/transaction_signing/main.go](examples/transaction_signing/main.go) for a complete example.
-
-## Whitelist System
-
-### How Whitelist Matching Works
-
-**Important**: The whitelist uses **OR logic** - an operation is allowed if it matches **ANY** rule.
-
-For each operation type (PersonalSign, EIP712, Transaction), the checker:
-1. Iterates through all rules of that type
-2. If **any single rule** matches, the operation is **immediately allowed**
-3. If **no rules** match, the operation is **denied**
-
-This allows you to add multiple rules for different scenarios:
-
-```go
-checker := ethsig.NewMemoryWhitelistChecker()
-
-// Add multiple rules - operation passes if ANY rule matches
-checker.AddPersonalSignRule(PersonalSignWhitelistRule{
-    ID:              "login-messages",
-    AllowedPrefixes: []string{"Login to"},
-})
-
-checker.AddPersonalSignRule(PersonalSignWhitelistRule{
-    ID:              "confirm-messages",
-    AllowedPrefixes: []string{"Confirm action"},
-})
-
-// ✓ "Login to app" passes (matches login-messages rule)
-// ✓ "Confirm action #123" passes (matches confirm-messages rule)
-// ✗ "Random message" fails (matches no rules)
-```
-
-### Basic Transaction Whitelist
-
-See [examples/whitelist_basic/main.go](examples/whitelist_basic/main.go) for a complete example.
-
-### Transaction with Parameter Constraints
-
-See [examples/whitelist_param_constraints/main.go](examples/whitelist_param_constraints/main.go) for a complete example.
-
-### Approve with Spender Whitelist
-
-See [examples/whitelist_approve/main.go](examples/whitelist_approve/main.go) for a complete example.
-
-### EIP-712 with Field Value Constraints
-
-See [examples/eip712_whitelist/main.go](examples/eip712_whitelist/main.go) for a complete example.
-
-### Multiple Field Constraints
-
-This example is included in [examples/eip712_whitelist/main.go](examples/eip712_whitelist/main.go).
-
-### Pattern Matching for Strings
-
-See [examples/eip712_pattern_matching/main.go](examples/eip712_pattern_matching/main.go) for a complete example.
-
-## Constraint Types
-
-### Parameter Constraints
-
-Parameter constraints apply to transaction function call parameters:
-
-- **Index**: Zero-based parameter position (0 = first param, 1 = second param, etc.)
-- **AllowedValues**: List of specific allowed values
-- **MinValue**: Minimum numeric value (for uint256, int256, etc.)
-- **MaxValue**: Maximum numeric value
-- **AllowedPattern**: Regex pattern for validation
-
-### Field Constraints
-
-Field constraints apply to EIP-712 typed data message fields:
-
-- **FieldName**: Name of the field to constrain
-- **AllowedValues**: List of specific allowed values
-- **MinValue**: Minimum numeric value
-- **MaxValue**: Maximum numeric value
-- **AllowedPattern**: Regex pattern for string fields
 
 ## Interfaces
 
@@ -201,11 +116,6 @@ type Signer interface {
 3. **Use LightScryptConfig for testing** to avoid timeouts:
    ```go
    signer, err := ethsig.NewKeystoreSigner(path, password, nil) // nil = LightScryptConfig
-   ```
-
-4. **Always use whitelists** in production to restrict operations:
-   ```go
-   protectedSigner := ethsig.NewWhitelistSigner(signer, checker)
    ```
 
 5. **Validate parameter and field values** using constraints to prevent unauthorized operations
