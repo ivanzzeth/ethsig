@@ -65,6 +65,11 @@ type AddressGetter interface {
     GetAddress() common.Address
 }
 
+// RawMessageSigner signs raw messages without hashing
+type RawMessageSigner interface {
+    SignRawMessage(raw []byte) ([]byte, error)
+}
+
 // HashSigner signs raw hashes
 type HashSigner interface {
     SignHash(hashedData common.Hash) ([]byte, error)
@@ -93,6 +98,7 @@ type TransactionSigner interface {
 // Signer combines all signing capabilities
 type Signer interface {
     AddressGetter
+    RawMessageSigner
     HashSigner
     EIP191Signer
     PersonalSigner
