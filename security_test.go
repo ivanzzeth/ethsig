@@ -150,7 +150,7 @@ func TestKeystoreSignerPasswordSecurity(t *testing.T) {
 	password := "test-password-123"
 
 	// Create a keystore
-	signer, keystorePath, err := CreateKeystore(tempDir, password)
+	signer, keystorePath, err := CreateKeystore(tempDir, password, nil)
 	if err != nil {
 		t.Fatalf("Failed to create keystore: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestKeystoreSignerPasswordSecurity(t *testing.T) {
 	}
 
 	// Test loading from keystore
-	loadedSigner, err := NewKeystoreSigner(keystorePath, password)
+	loadedSigner, err := NewKeystoreSigner(keystorePath, password, nil)
 	if err != nil {
 		t.Fatalf("Failed to load keystore: %v", err)
 	}

@@ -24,6 +24,27 @@ var (
 	_ TransactionSigner = (*KeystoreSigner)(nil)
 )
 
+// KeystoreScryptConfig holds the scrypt parameters for keystore encryption/decryption
+type KeystoreScryptConfig struct {
+	N int // CPU/memory cost parameter
+	P int // Parallelization parameter
+}
+
+// Default scrypt configurations
+var (
+	// StandardScryptConfig uses standard scrypt parameters (high security, slower)
+	StandardScryptConfig = KeystoreScryptConfig{
+		N: keystore.StandardScryptN,
+		P: keystore.StandardScryptP,
+	}
+
+	// LightScryptConfig uses light scrypt parameters (lower security, faster - suitable for testing)
+	LightScryptConfig = KeystoreScryptConfig{
+		N: keystore.LightScryptN,
+		P: keystore.LightScryptP,
+	}
+)
+
 // KeystoreSigner implements Signer using an Ethereum keystore file
 // It loads the private key from a keystore file and delegates all signing operations
 // to the keystore's signing methods
@@ -40,20 +61,26 @@ type KeystoreSigner struct {
 // Parameters:
 //   - keystorePath: Path to the keystore file
 //   - password: Password to decrypt the keystore file
+//   - scryptConfig: Scrypt configuration (use nil for LightScryptConfig default)
 //
 // Returns:
 //   - *KeystoreSigner: The initialized keystore signer
 //   - error: Any error that occurred during loading or decryption
-func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
+func NewKeystoreSigner(keystorePath, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
 	if keystorePath == "" {
 		return nil, NewKeystoreError("keystore path cannot be empty", nil)
 	}
 
+	// Use default config if not provided
+	if scryptConfig == nil {
+		scryptConfig = &LightScryptConfig
+	}
+
 	// Get the directory containing the keystore file
 	keystoreDir := filepath.Dir(keystorePath)
-	
+
 	// Create a keystore manager in the same directory as the keystore file
-	ks := keystore.NewKeyStore(keystoreDir, keystore.StandardScryptN, keystore.StandardScryptP)
+	ks := keystore.NewKeyStore(keystoreDir, scryptConfig.N, scryptConfig.P)
 
 	// Find the account in the keystore
 	accountList := ks.Accounts()
@@ -75,6 +102,14 @@ func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 	// Get the address from the account
 	address := account.Address
 
+	// Validate password by attempting to unlock the account
+	err := ks.Unlock(account, password)
+	if err != nil {
+		return nil, NewKeystoreError("failed to unlock account with provided password", err)
+	}
+	// Lock it again after validation
+	ks.Lock(account.Address)
+
 	// Create a signer that delegates to the keystore
 	return &KeystoreSigner{
 		privateKeySigner: nil, // We'll handle signing through keystore
@@ -91,11 +126,12 @@ func NewKeystoreSigner(keystorePath, password string) (*KeystoreSigner, error) {
 // Parameters:
 //   - keystoreDir: Directory containing keystore files
 //   - password: Password to decrypt the keystore file
+//   - scryptConfig: Scrypt configuration (use nil for LightScryptConfig default)
 //
 // Returns:
 //   - *KeystoreSigner: The initialized keystore signer
 //   - error: Any error that occurred during loading or decryption
-func NewKeystoreSignerFromDirectory(keystoreDir, password string) (*KeystoreSigner, error) {
+func NewKeystoreSignerFromDirectory(keystoreDir, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
 	if keystoreDir == "" {
 		return nil, NewKeystoreError("keystore directory cannot be empty", nil)
 	}
@@ -119,21 +155,27 @@ func NewKeystoreSignerFromDirectory(keystoreDir, password string) (*KeystoreSign
 		return nil, NewKeystoreError("no keystore files found in directory", nil)
 	}
 
-	return NewKeystoreSigner(keystoreFile, password)
+	return NewKeystoreSigner(keystoreFile, password, scryptConfig)
 }
 
 // CreateKeystore creates a new keystore file with a randomly generated private key
 // Parameters:
 //   - keystoreDir: Directory to create the keystore file in
 //   - password: Password to encrypt the keystore file
+//   - scryptConfig: Scrypt configuration (use nil for LightScryptConfig default)
 //
 // Returns:
 //   - *KeystoreSigner: The initialized keystore signer
 //   - string: Path to the created keystore file
 //   - error: Any error that occurred during creation
-func CreateKeystore(keystoreDir, password string) (*KeystoreSigner, string, error) {
+func CreateKeystore(keystoreDir, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, string, error) {
 	if keystoreDir == "" {
 		return nil, "", NewKeystoreError("keystore directory cannot be empty", nil)
+	}
+
+	// Use default config if not provided
+	if scryptConfig == nil {
+		scryptConfig = &LightScryptConfig
 	}
 
 	// Create the keystore directory if it doesn't exist
@@ -142,7 +184,7 @@ func CreateKeystore(keystoreDir, password string) (*KeystoreSigner, string, erro
 	}
 
 	// Create a new keystore
-	ks := keystore.NewKeyStore(keystoreDir, keystore.StandardScryptN, keystore.StandardScryptP)
+	ks := keystore.NewKeyStore(keystoreDir, scryptConfig.N, scryptConfig.P)
 
 	// Create a new account
 	account, err := ks.NewAccount(password)

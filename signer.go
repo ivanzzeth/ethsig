@@ -42,8 +42,96 @@ type TransactionSigner interface {
 	SignTransactionWithChainID(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error)
 }
 
-func SignHash(signer HashSigner, hashedData common.Hash) ([]byte, error) {
-	return SignHashWithExactSigner(signer, hashedData)
+var (
+	_ AddressGetter     = (*Signer)(nil)
+	_ RawMessageSigner  = (*Signer)(nil)
+	_ HashSigner        = (*Signer)(nil)
+	_ EIP191Signer      = (*Signer)(nil)
+	_ PersonalSigner    = (*Signer)(nil)
+	_ TypedDataSigner   = (*Signer)(nil)
+	_ TransactionSigner = (*Signer)(nil)
+)
+
+// Signer is a flexible wrapper that accepts any underlying signer implementation
+// and provides a unified interface for all signing operations.
+// It automatically delegates to the most appropriate method based on what the underlying signer supports.
+type Signer struct {
+	signer any
+}
+
+// NewSigner creates a new Signer instance wrapping any underlying signer
+func NewSigner(signer any) *Signer {
+	return &Signer{
+		signer: signer,
+	}
+}
+
+// GetAddress returns the address associated with this signer
+// Implements AddressGetter interface
+// NOTE: If not supported by the underlying signer, ZERO address will be returned.
+func (s *Signer) GetAddress() common.Address {
+	addr, _ := GetAddress(s.signer)
+	return addr
+}
+
+// SafeGetAddress returns the address associated with this signer with error handling
+func (s *Signer) SafeGetAddress() (common.Address, error) {
+	return GetAddress(s.signer)
+}
+
+// SignRawMessage signs raw message bytes
+// Implements RawMessageSigner interface
+func (s *Signer) SignRawMessage(raw []byte) ([]byte, error) {
+	return SignRawMessage(s.signer, raw)
+}
+
+// SignHash signs hashed data
+// Implements HashSigner interface
+func (s *Signer) SignHash(hashedData common.Hash) ([]byte, error) {
+	return SignHash(s.signer, hashedData)
+}
+
+// SignEIP191Message signs an EIP-191 formatted message
+// Implements EIP191Signer interface
+func (s *Signer) SignEIP191Message(message string) ([]byte, error) {
+	return SignEIP191Message(s.signer, message)
+}
+
+// PersonalSign signs data using personal_sign (EIP-191 0x45)
+// Implements PersonalSigner interface
+func (s *Signer) PersonalSign(data string) ([]byte, error) {
+	return PersonalSign(s.signer, data)
+}
+
+// SignTypedData signs EIP-712 typed data
+// Implements TypedDataSigner interface
+func (s *Signer) SignTypedData(typedData eip712.TypedData) ([]byte, error) {
+	return SignTypedData(s.signer, typedData)
+}
+
+// SignTransactionWithChainID signs an Ethereum transaction with explicit chainID
+// Implements TransactionSigner interface
+func (s *Signer) SignTransactionWithChainID(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+	return SignTransaction(s.signer, tx, chainID)
+}
+
+// SignHash flexibly signs hashed data using the most appropriate method based on signer type
+// It accepts any signer type and automatically chooses the best implementation:
+// - If signer implements HashSigner, use SignHash directly
+// - If signer implements RawMessageSigner, use SignHashWithRawMessageSigner
+// This allows for maximum flexibility and automatic optimization
+func SignHash(signer any, hashedData common.Hash) ([]byte, error) {
+	// Try HashSigner first (most specific)
+	if hs, ok := signer.(HashSigner); ok {
+		return hs.SignHash(hashedData)
+	}
+
+	// Try RawMessageSigner (uses raw message signing)
+	if raw, ok := signer.(RawMessageSigner); ok {
+		return SignHashWithRawMessageSigner(raw, hashedData)
+	}
+
+	return nil, NewSignerError("signer does not implement HashSigner or RawMessageSigner", nil)
 }
 
 // SignHashWithExactSigner is a helper function that signs hashed data using a HashSigner
@@ -134,12 +222,38 @@ func PersonalSignWithHash(signer HashSigner, data string) ([]byte, error) {
 func PersonalSignWithEIP191(signer EIP191Signer, data string) ([]byte, error) {
 	// Create the personal sign message format
 	// "\x19Ethereum Signed Message:\n" + len(message) + message
+	// Format: 0x19 <0x45 ('E')> <"thereum Signed Message:\n" + len(message)> <message>
 	message := []byte(data)
 	prefix := []byte(fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(message)))
 	prefixedMessage := append(prefix, message...)
 
 	// Sign using EIP191Signer
 	return signer.SignEIP191Message(string(prefixedMessage))
+}
+
+// SignHashWithRawMessageSigner implements hash signing using a RawMessageSigner
+// This is a composable version that builds on top of SignRawMessage
+func SignHashWithRawMessageSigner(signer RawMessageSigner, hashedData common.Hash) ([]byte, error) {
+	return signer.SignRawMessage(hashedData[:])
+}
+
+// SignRawMessage flexibly signs raw message data using the most appropriate method based on signer type
+// It accepts any signer type and automatically chooses the best implementation:
+// - If signer implements RawMessageSigner, use SignRawMessage directly
+// - If signer implements HashSigner, use SignRawMessageWithHashSigner
+// This allows for maximum flexibility and automatic optimization
+func SignRawMessage(signer any, raw []byte) ([]byte, error) {
+	// Try RawMessageSigner first (most specific)
+	if rms, ok := signer.(RawMessageSigner); ok {
+		return rms.SignRawMessage(raw)
+	}
+
+	// Try HashSigner (uses hash-based signing)
+	if hs, ok := signer.(HashSigner); ok {
+		return SignRawMessageWithHashSigner(hs, raw)
+	}
+
+	return nil, NewSignerError("signer does not implement RawMessageSigner or HashSigner", nil)
 }
 
 func SignRawMessageWithHashSigner(signer HashSigner, raw []byte) ([]byte, error) {

@@ -405,3 +405,192 @@ func TestSignTransaction_ChainIDValidation(t *testing.T) {
 		t.Logf("✓ Successfully signed with valid chainID")
 	})
 }
+
+// TestSigner_AllInterfaces tests that the Signer wrapper correctly implements all interfaces
+// and properly delegates to the underlying signer implementation
+func TestSigner_AllInterfaces(t *testing.T) {
+	// Create underlying signer
+	ethSigner, err := NewEthPrivateKeySignerFromPrivateKeyHex(testPrivateKeyHex)
+	if err != nil {
+		t.Fatalf("Failed to create eth signer: %v", err)
+	}
+
+	// Wrap it with Signer
+	signer := NewSigner(ethSigner)
+
+	t.Run("GetAddress", func(t *testing.T) {
+		addr := signer.GetAddress()
+		expectedAddr := ethSigner.GetAddress()
+		if addr != expectedAddr {
+			t.Errorf("Address mismatch. Expected: %s, Got: %s", expectedAddr.Hex(), addr.Hex())
+		}
+		t.Logf("✓ GetAddress works correctly: %s", addr.Hex())
+	})
+
+	t.Run("SafeGetAddress", func(t *testing.T) {
+		addr, err := signer.SafeGetAddress()
+		if err != nil {
+			t.Fatalf("SafeGetAddress failed: %v", err)
+		}
+		expectedAddr := ethSigner.GetAddress()
+		if addr != expectedAddr {
+			t.Errorf("Address mismatch. Expected: %s, Got: %s", expectedAddr.Hex(), addr.Hex())
+		}
+		t.Logf("✓ SafeGetAddress works correctly: %s", addr.Hex())
+	})
+
+	t.Run("SignHash", func(t *testing.T) {
+		hash := common.HexToHash("0x1234567890123456789012345678901234567890123456789012345678901234")
+		signature, err := signer.SignHash(hash)
+		if err != nil {
+			t.Fatalf("SignHash failed: %v", err)
+		}
+		if len(signature) != 65 {
+			t.Errorf("Invalid signature length. Expected: 65, Got: %d", len(signature))
+		}
+		t.Logf("✓ SignHash works correctly")
+	})
+
+	t.Run("SignRawMessage", func(t *testing.T) {
+		message := []byte("test message")
+		signature, err := signer.SignRawMessage(message)
+		if err != nil {
+			t.Fatalf("SignRawMessage failed: %v", err)
+		}
+		if len(signature) != 65 {
+			t.Errorf("Invalid signature length. Expected: 65, Got: %d", len(signature))
+		}
+		t.Logf("✓ SignRawMessage works correctly")
+	})
+
+	t.Run("SignEIP191Message", func(t *testing.T) {
+		// EIP-191 version 0x45 format: \x19Ethereum Signed Message:\n{length}{message}
+		message := "\x19Ethereum Signed Message:\n12test message"
+		signature, err := signer.SignEIP191Message(message)
+		if err != nil {
+			t.Fatalf("SignEIP191Message failed: %v", err)
+		}
+		if len(signature) != 65 {
+			t.Errorf("Invalid signature length. Expected: 65, Got: %d", len(signature))
+		}
+		t.Logf("✓ SignEIP191Message works correctly")
+	})
+
+	t.Run("PersonalSign", func(t *testing.T) {
+		data := "Hello, Ethereum!"
+		signature, err := signer.PersonalSign(data)
+		if err != nil {
+			t.Fatalf("PersonalSign failed: %v", err)
+		}
+		if len(signature) != 65 {
+			t.Errorf("Invalid signature length. Expected: 65, Got: %d", len(signature))
+		}
+		t.Logf("✓ PersonalSign works correctly")
+	})
+
+	t.Run("SignTypedData", func(t *testing.T) {
+		// This test requires a valid TypedData structure
+		// For now, we'll skip the detailed test as it requires complex setup
+		// The interface implementation is verified by compilation
+		t.Skip("TypedData signing requires complex test data setup")
+	})
+
+	t.Run("SignTransactionWithChainID", func(t *testing.T) {
+		to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		tx := types.NewTx(&types.LegacyTx{
+			Nonce:    0,
+			GasPrice: big.NewInt(30000000000),
+			Gas:      21000,
+			To:       &to,
+			Value:    big.NewInt(1000000000000000000),
+			Data:     nil,
+		})
+
+		chainID := big.NewInt(137)
+		signedTx, err := signer.SignTransactionWithChainID(tx, chainID)
+		if err != nil {
+			t.Fatalf("SignTransactionWithChainID failed: %v", err)
+		}
+
+		// Verify the signature is valid
+		recoveredSigner := types.LatestSignerForChainID(chainID)
+		recoveredAddr, err := types.Sender(recoveredSigner, signedTx)
+		if err != nil {
+			t.Fatalf("Failed to recover sender: %v", err)
+		}
+
+		expectedAddr := signer.GetAddress()
+		if recoveredAddr != expectedAddr {
+			t.Errorf("Address mismatch. Expected: %s, Got: %s", expectedAddr.Hex(), recoveredAddr.Hex())
+		}
+		t.Logf("✓ SignTransactionWithChainID works correctly")
+	})
+
+	t.Run("UseWithBindSignerFn", func(t *testing.T) {
+		chainID := big.NewInt(137)
+		signerFn, err := NewBindSignerFn(signer, chainID)
+		if err != nil {
+			t.Fatalf("Failed to create bind.SignerFn: %v", err)
+		}
+
+		// Create TransactOpts
+		opts := &bind.TransactOpts{
+			From:   signer.GetAddress(),
+			Signer: signerFn,
+		}
+
+		if opts.Signer == nil {
+			t.Fatal("TransactOpts.Signer is nil")
+		}
+
+		// Test signing with the bind.SignerFn
+		to := common.HexToAddress("0x0000000000000000000000000000000000000002")
+		tx := types.NewTx(&types.LegacyTx{
+			Nonce:    0,
+			GasPrice: big.NewInt(30000000000),
+			Gas:      21000,
+			To:       &to,
+			Value:    big.NewInt(1000000000000000000),
+			Data:     nil,
+		})
+
+		signedTx, err := signerFn(signer.GetAddress(), tx)
+		if err != nil {
+			t.Fatalf("bind.SignerFn failed to sign: %v", err)
+		}
+
+		// Verify signature
+		recoveredSigner := types.LatestSignerForChainID(chainID)
+		recoveredAddr, err := types.Sender(recoveredSigner, signedTx)
+		if err != nil {
+			t.Fatalf("Failed to recover sender: %v", err)
+		}
+
+		if recoveredAddr != signer.GetAddress() {
+			t.Errorf("Address mismatch. Expected: %s, Got: %s", signer.GetAddress().Hex(), recoveredAddr.Hex())
+		}
+
+		t.Logf("✓ Signer works correctly with bind.SignerFn")
+	})
+}
+
+// TestSigner_InterfaceCompleteness verifies that Signer implements all expected interfaces
+func TestSigner_InterfaceCompleteness(t *testing.T) {
+	ethSigner, err := NewEthPrivateKeySignerFromPrivateKeyHex(testPrivateKeyHex)
+	if err != nil {
+		t.Fatalf("Failed to create eth signer: %v", err)
+	}
+
+	signer := NewSigner(ethSigner)
+
+	// Test interface assertions
+	var _ AddressGetter = signer
+	var _ RawMessageSigner = signer
+	var _ HashSigner = signer
+	var _ EIP191Signer = signer
+	var _ PersonalSigner = signer
+	var _ TypedDataSigner = signer
+	var _ TransactionSigner = signer
+
+	t.Log("✓ Signer implements all required interfaces")
+}

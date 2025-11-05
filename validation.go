@@ -38,36 +38,42 @@ func ValidateEIP191Message(message []byte) error {
 
 	case 0x45: // personal_sign messages (Ethereum Signed Message)
 		// Format: 0x19 <0x45 ('E')> <"thereum Signed Message:\n" + len(message)> <message>
+		// Full format: \x19Ethereum Signed Message:\n{len}{message}
 		expectedPrefix := []byte("\x19Ethereum Signed Message:\n")
 		if !bytes.HasPrefix(message, expectedPrefix) {
 			return NewValidationError("invalid EIP-191 version 0x45 message", fmt.Errorf("missing 'Ethereum Signed Message:' prefix"))
 		}
-		
+
 		// Extract the length part after the prefix
 		lengthPart := message[len(expectedPrefix):]
-		
-		// Find the newline that separates length from message
-		newlinePos := bytes.IndexByte(lengthPart, '\n')
-		if newlinePos == -1 {
-			return NewValidationError("invalid EIP-191 version 0x45 message", fmt.Errorf("no newline found after length"))
+
+		// Find where the actual message starts (after the length digits)
+		// The length is a decimal number followed immediately by the message
+		lengthEndPos := 0
+		for lengthEndPos < len(lengthPart) && lengthPart[lengthEndPos] >= '0' && lengthPart[lengthEndPos] <= '9' {
+			lengthEndPos++
 		}
-		
+
+		if lengthEndPos == 0 {
+			return NewValidationError("invalid EIP-191 version 0x45 message", fmt.Errorf("no length found"))
+		}
+
 		// Parse the length
-		lengthStr := string(lengthPart[:newlinePos])
+		lengthStr := string(lengthPart[:lengthEndPos])
 		expectedLength, err := strconv.Atoi(lengthStr)
 		if err != nil {
 			return NewValidationError("invalid EIP-191 version 0x45 message", fmt.Errorf("invalid length format: %w", err))
 		}
-		
+
 		// Calculate where the message should start
-		messageStart := len(expectedPrefix) + newlinePos + 1
-		
+		messageStart := len(expectedPrefix) + lengthEndPos
+
 		// Verify the actual message length matches the declared length
 		actualLength := len(message) - messageStart
 		if actualLength != expectedLength {
 			return NewValidationError("invalid EIP-191 version 0x45 message", fmt.Errorf("declared length %d, actual length %d", expectedLength, actualLength))
 		}
-		
+
 		return nil
 
 	default:

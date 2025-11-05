@@ -26,7 +26,7 @@ func TestNewKeystoreSigner(t *testing.T) {
 	}
 
 	// Test loading the keystore
-	signer, err := NewKeystoreSigner(keystorePath, testPassword)
+	signer, err := NewKeystoreSigner(keystorePath, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create keystore signer: %v", err)
 	}
@@ -45,13 +45,13 @@ func TestNewKeystoreSigner(t *testing.T) {
 
 func TestNewKeystoreSigner_InvalidPath(t *testing.T) {
 	// Test with non-existent file
-	_, err := NewKeystoreSigner("/nonexistent/path", testPassword)
+	_, err := NewKeystoreSigner("/nonexistent/path", testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for non-existent keystore file")
 	}
 
 	// Test with empty path
-	_, err = NewKeystoreSigner("", testPassword)
+	_, err = NewKeystoreSigner("", testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for empty keystore path")
 	}
@@ -68,7 +68,7 @@ func TestNewKeystoreSigner_WrongPassword(t *testing.T) {
 	}
 
 	// Test with wrong password
-	_, err = NewKeystoreSigner(keystorePath, "wrongpassword")
+	_, err = NewKeystoreSigner(keystorePath, "wrongpassword", nil)
 	if err == nil {
 		t.Error("Expected error for wrong password")
 	}
@@ -85,7 +85,7 @@ func TestNewKeystoreSignerFromDirectory(t *testing.T) {
 	}
 
 	// Test loading from directory
-	signer, err := NewKeystoreSignerFromDirectory(tempDir, testPassword)
+	signer, err := NewKeystoreSignerFromDirectory(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create keystore signer from directory: %v", err)
 	}
@@ -107,19 +107,19 @@ func TestNewKeystoreSignerFromDirectory_EmptyDirectory(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Test with empty directory
-	_, err := NewKeystoreSignerFromDirectory(tempDir, testPassword)
+	_, err := NewKeystoreSignerFromDirectory(tempDir, testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for empty directory")
 	}
 
 	// Test with non-existent directory
-	_, err = NewKeystoreSignerFromDirectory("/nonexistent/directory", testPassword)
+	_, err = NewKeystoreSignerFromDirectory("/nonexistent/directory", testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for non-existent directory")
 	}
 
 	// Test with empty directory path
-	_, err = NewKeystoreSignerFromDirectory("", testPassword)
+	_, err = NewKeystoreSignerFromDirectory("", testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for empty directory path")
 	}
@@ -130,7 +130,7 @@ func TestCreateKeystore(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a new keystore
-	signer, keystorePath, err := CreateKeystore(tempDir, testPassword)
+	signer, keystorePath, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create keystore: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCreateKeystore(t *testing.T) {
 	}
 
 	// Verify we can load from the created keystore
-	loadedSigner, err := NewKeystoreSigner(keystorePath, testPassword)
+	loadedSigner, err := NewKeystoreSigner(keystorePath, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to load created keystore: %v", err)
 	}
@@ -161,13 +161,13 @@ func TestCreateKeystore(t *testing.T) {
 
 func TestCreateKeystore_InvalidDirectory(t *testing.T) {
 	// Test with empty directory
-	_, _, err := CreateKeystore("", testPassword)
+	_, _, err := CreateKeystore("", testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for empty directory")
 	}
 
 	// Test with invalid directory path
-	_, _, err = CreateKeystore("/invalid/path/with/permission/denied", testPassword)
+	_, _, err = CreateKeystore("/invalid/path/with/permission/denied", testPassword, nil)
 	if err == nil {
 		t.Error("Expected error for invalid directory path")
 	}
@@ -178,7 +178,7 @@ func TestKeystoreSigner_SignHash(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestKeystoreSigner_PersonalSign(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestKeystoreSigner_SignEIP191Message(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestKeystoreSigner_SignTypedData(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestKeystoreSigner_SignTransaction(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestKeystoreSigner_ExportPrivateKey(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestKeystoreSigner_InterfaceCompatibility(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestKeystoreSigner_FlexibleHelpers(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -623,7 +623,7 @@ func TestKeystoreSigner_ComposableHelpers(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
@@ -719,7 +719,7 @@ func TestKeystoreSignerWithSpecTest(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a test keystore and signer
-	signer, _, err := CreateKeystore(tempDir, testPassword)
+	signer, _, err := CreateKeystore(tempDir, testPassword, nil)
 	if err != nil {
 		t.Fatalf("Failed to create test keystore: %v", err)
 	}
