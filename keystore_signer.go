@@ -45,28 +45,83 @@ var (
 	}
 )
 
-// KeystoreSigner implements Signer using an Ethereum keystore file
-// It loads the private key from a keystore file and delegates all signing operations
-// to the keystore's signing methods
+// KeystoreSigner implements Signer using an Ethereum keystore
+// It delegates all signing operations to the keystore's signing methods
+// This allows external code to manage the KeyStore and create signers for specific addresses
 type KeystoreSigner struct {
-	privateKeySigner *EthPrivateKeySigner
-	keystorePath     string
-	address          common.Address
-	keyStore         *keystore.KeyStore
-	account          accounts.Account
-	password         *SecureBytes
+	keyStore *keystore.KeyStore
+
+	address  common.Address
+	account  accounts.Account
+	password *SecureBytes
 }
 
-// NewKeystoreSigner creates a new KeystoreSigner instance by loading a private key from a keystore file
+// NewKeystoreSigner creates a new KeystoreSigner from an existing KeyStore and address
+// This is the recommended way to create KeystoreSigners when managing multiple accounts,
+// as it allows external code to manage the KeyStore lifecycle and create signers for specific addresses.
+//
 // Parameters:
-//   - keystorePath: Path to the keystore file
-//   - password: Password to decrypt the keystore file
+//   - ks: An existing KeyStore instance (managed by caller)
+//   - address: The address to sign with (must exist in the KeyStore)
+//   - password: Password to unlock the account
+//
+// Returns:
+//   - *KeystoreSigner: The initialized keystore signer
+//   - error: Any error that occurred during account lookup or password validation
+//
+// Example:
+//
+//	// Create a single KeyStore for all accounts
+//	ks := keystore.NewKeyStore("/path/to/keystore", keystore.StandardScryptN, keystore.StandardScryptP)
+//
+//	// Create signers for different addresses from the same KeyStore
+//	addr1 := common.HexToAddress("0x1234...")
+//	signer1, _ := ethsig.NewKeystoreSigner(ks, addr1, "password1")
+//
+//	addr2 := common.HexToAddress("0x5678...")
+//	signer2, _ := ethsig.NewKeystoreSigner(ks, addr2, "password2")
+func NewKeystoreSigner(ks *keystore.KeyStore, address common.Address, password string) (*KeystoreSigner, error) {
+	account, err := ks.Find(accounts.Account{Address: address})
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate password by attempting to unlock the account
+	err = ks.Unlock(account, password)
+	if err != nil {
+		return nil, NewKeystoreError("failed to unlock account with provided password", err)
+	}
+	// Lock it again after validation
+	ks.Lock(account.Address)
+
+	// Create a signer that delegates to the keystore
+
+	return &KeystoreSigner{
+		keyStore: ks,
+		address:  address,
+		account:  account,
+		password: NewSecureBytesFromString(password),
+	}, nil
+}
+
+// NewKeystoreSignerFromPath creates a KeystoreSigner from a keystore directory/file path
+// This is a convenience function that creates a new KeyStore internally.
+//
+// Parameters:
+//   - keystorePath: Path to the keystore directory or file
+//   - address: The address to sign with
+//   - password: Password to unlock the account
 //   - scryptConfig: Scrypt configuration (use nil for LightScryptConfig default)
 //
 // Returns:
 //   - *KeystoreSigner: The initialized keystore signer
-//   - error: Any error that occurred during loading or decryption
-func NewKeystoreSigner(keystorePath, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
+//   - error: Any error that occurred
+//
+// Example:
+//
+//	addr := common.HexToAddress("0x1234...")
+//	signer, err := ethsig.NewKeystoreSignerFromPath("/path/to/keystore", addr, "password", nil)
+func NewKeystoreSignerFromPath(keystorePath string, address common.Address, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
 	if keystorePath == "" {
 		return nil, NewKeystoreError("keystore path cannot be empty", nil)
 	}
@@ -76,138 +131,77 @@ func NewKeystoreSigner(keystorePath, password string, scryptConfig *KeystoreScry
 		scryptConfig = &LightScryptConfig
 	}
 
-	// Get the directory containing the keystore file
-	keystoreDir := filepath.Dir(keystorePath)
+	// Check if path is a file or directory
+	info, err := os.Stat(keystorePath)
+	if err != nil {
+		return nil, NewKeystoreError("failed to access keystore path", err)
+	}
 
-	// Create a keystore manager in the same directory as the keystore file
+	var keystoreDir string
+	if info.IsDir() {
+		// Path is a directory
+		keystoreDir = keystorePath
+	} else {
+		// Path is a file, use its directory
+		keystoreDir = filepath.Dir(keystorePath)
+	}
+
+	// Create a keystore instance
 	ks := keystore.NewKeyStore(keystoreDir, scryptConfig.N, scryptConfig.P)
 
-	// Find the account in the keystore
-	accountList := ks.Accounts()
-	var account accounts.Account
-	found := false
-	
-	for _, acc := range accountList {
-		if acc.URL.Path == keystorePath {
-			account = acc
-			found = true
-			break
-		}
-	}
-	
-	if !found {
-		return nil, NewKeystoreError("keystore file not found in directory", fmt.Errorf("%s", keystorePath))
-	}
-
-	// Get the address from the account
-	address := account.Address
-
-	// Validate password by attempting to unlock the account
-	err := ks.Unlock(account, password)
-	if err != nil {
-		return nil, NewKeystoreError("failed to unlock account with provided password", err)
-	}
-	// Lock it again after validation
-	ks.Lock(account.Address)
-
-	// Create a signer that delegates to the keystore
-	return &KeystoreSigner{
-		privateKeySigner: nil, // We'll handle signing through keystore
-		keystorePath:     keystorePath,
-		address:          address,
-		keyStore:         ks,
-		account:          account,
-		password:         NewSecureBytesFromString(password),
-	}, nil
+	// Use the main constructor
+	return NewKeystoreSigner(ks, address, password)
 }
 
-// NewKeystoreSignerFromDirectory creates a new KeystoreSigner by finding and loading
-// a keystore file from a directory. It loads the first keystore file found.
+// NewKeystoreSignerFromDirectory creates a KeystoreSigner from a directory and address
+// This is a convenience wrapper around NewKeystoreSignerFromPath.
+//
 // Parameters:
 //   - keystoreDir: Directory containing keystore files
-//   - password: Password to decrypt the keystore file
+//   - address: The address to sign with
+//   - password: Password to unlock the account
 //   - scryptConfig: Scrypt configuration (use nil for LightScryptConfig default)
 //
 // Returns:
 //   - *KeystoreSigner: The initialized keystore signer
-//   - error: Any error that occurred during loading or decryption
-func NewKeystoreSignerFromDirectory(keystoreDir, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
-	if keystoreDir == "" {
-		return nil, NewKeystoreError("keystore directory cannot be empty", nil)
-	}
-
-	// List all files in the directory
-	files, err := os.ReadDir(keystoreDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read keystore directory: %w", err)
-	}
-
-	// Find the first keystore file (files starting with UTC--)
-	var keystoreFile string
-	for _, file := range files {
-		if !file.IsDir() && len(file.Name()) > 3 && file.Name()[:3] == "UTC" {
-			keystoreFile = filepath.Join(keystoreDir, file.Name())
-			break
-		}
-	}
-
-	if keystoreFile == "" {
-		return nil, NewKeystoreError("no keystore files found in directory", nil)
-	}
-
-	return NewKeystoreSigner(keystoreFile, password, scryptConfig)
+//   - error: Any error that occurred
+//
+// Example:
+//
+//	addr := common.HexToAddress("0x1234...")
+//	signer, err := ethsig.NewKeystoreSignerFromDirectory("/path/to/keystore", addr, "password", nil)
+func NewKeystoreSignerFromDirectory(keystoreDir string, address common.Address, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
+	return NewKeystoreSignerFromPath(keystoreDir, address, password, scryptConfig)
 }
 
-// CreateKeystore creates a new keystore file with a randomly generated private key
+// NewKeystoreSignerFromFile creates a KeystoreSigner from a specific keystore file and address
+// This is a convenience wrapper around NewKeystoreSignerFromPath that validates the file exists.
+//
 // Parameters:
-//   - keystoreDir: Directory to create the keystore file in
-//   - password: Password to encrypt the keystore file
+//   - keystoreFile: Path to a specific keystore file
+//   - address: The address to sign with (must match the file's address)
+//   - password: Password to unlock the account
 //   - scryptConfig: Scrypt configuration (use nil for LightScryptConfig default)
 //
 // Returns:
 //   - *KeystoreSigner: The initialized keystore signer
-//   - string: Path to the created keystore file
-//   - error: Any error that occurred during creation
-func CreateKeystore(keystoreDir, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, string, error) {
-	if keystoreDir == "" {
-		return nil, "", NewKeystoreError("keystore directory cannot be empty", nil)
-	}
-
-	// Use default config if not provided
-	if scryptConfig == nil {
-		scryptConfig = &LightScryptConfig
-	}
-
-	// Create the keystore directory if it doesn't exist
-	if err := os.MkdirAll(keystoreDir, 0700); err != nil {
-		return nil, "", NewKeystoreError("failed to create keystore directory", err)
-	}
-
-	// Create a new keystore
-	ks := keystore.NewKeyStore(keystoreDir, scryptConfig.N, scryptConfig.P)
-
-	// Create a new account
-	account, err := ks.NewAccount(password)
+//   - error: Any error that occurred
+//
+// Example:
+//
+//	addr := common.HexToAddress("0x1234...")
+//	signer, err := ethsig.NewKeystoreSignerFromFile("/path/to/keystore/UTC--2024...", addr, "password", nil)
+func NewKeystoreSignerFromFile(keystoreFile string, address common.Address, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
+	// Validate the file exists and is not a directory
+	info, err := os.Stat(keystoreFile)
 	if err != nil {
-		return nil, "", NewKeystoreError("failed to create new account", err)
+		return nil, NewKeystoreError("keystore file not found", err)
+	}
+	if info.IsDir() {
+		return nil, NewKeystoreError("path is a directory, expected a file", nil)
 	}
 
-	// Create the signer using the keystore
-	signer := &KeystoreSigner{
-		privateKeySigner: nil,
-		keystorePath:     account.URL.Path,
-		address:          account.Address,
-		keyStore:         ks,
-		account:          account,
-		password:         NewSecureBytesFromString(password),
-	}
-
-	return signer, account.URL.Path, nil
-}
-
-// GetKeystorePath returns the path to the keystore file
-func (s *KeystoreSigner) GetKeystorePath() string {
-	return s.keystorePath
+	return NewKeystoreSignerFromPath(keystoreFile, address, password, scryptConfig)
 }
 
 // PersonalSign implements personal_sign (EIP-191 version 0x45)
@@ -227,7 +221,7 @@ func (s *KeystoreSigner) PersonalSign(data string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
 	return NormalizeSignatureV(signature), nil
@@ -248,13 +242,13 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
 	if len(signature) == 65 && signature[64] < 27 {
 		signature[64] += 27
 	}
-	
+
 	return signature, nil
 }
 
@@ -265,13 +259,13 @@ func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
 	if len(signature) == 65 && signature[64] < 27 {
 		signature[64] += 27
 	}
-	
+
 	return signature, nil
 }
 
@@ -281,13 +275,13 @@ func (s *KeystoreSigner) SignHash(hashedData common.Hash) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
 	if len(signature) == 65 && signature[64] < 27 {
 		signature[64] += 27
 	}
-	
+
 	return signature, nil
 }
 
@@ -318,14 +312,6 @@ func (s *KeystoreSigner) SignTransactionWithChainID(tx *types.Transaction, chain
 	return s.keyStore.SignTxWithPassphrase(s.account, string(s.password.Bytes()), tx, chainID)
 }
 
-// ExportPrivateKey exports the private key in hex format
-// WARNING: This exposes the private key in plain text. Use with caution.
-// Note: With the current keystore-based implementation, we cannot directly export the private key
-// as the keystore doesn't provide a method to extract the private key in plain text.
-func (s *KeystoreSigner) ExportPrivateKey() (string, error) {
-	return "", NewKeystoreError("private key export not supported with keystore-based implementation", nil)
-}
-
 // Close securely cleans up sensitive data from memory
 // This should be called when the signer is no longer needed
 func (s *KeystoreSigner) Close() {
@@ -333,31 +319,4 @@ func (s *KeystoreSigner) Close() {
 		s.password.Zeroize()
 		s.password = nil
 	}
-}
-
-// createTestKeystore creates a test keystore file for testing purposes
-// This is an internal helper function and should not be exported
-func createTestKeystore(keystoreDir, password string) (string, common.Address, error) {
-	// Generate a new private key
-	privateKey, err := crypto.GenerateKey()
-	if err != nil {
-		return "", common.Address{}, NewKeystoreError("failed to generate private key", err)
-	}
-
-	// Create the keystore directory if it doesn't exist
-	if err := os.MkdirAll(keystoreDir, 0700); err != nil {
-		return "", common.Address{}, NewKeystoreError("failed to create keystore directory", err)
-	}
-
-	// Create a new keystore
-	ks := keystore.NewKeyStore(keystoreDir, keystore.LightScryptN, keystore.LightScryptP)
-
-	// Import the private key
-	account, err := ks.ImportECDSA(privateKey, password)
-	if err != nil {
-		return "", common.Address{}, NewKeystoreError("failed to import private key", err)
-	}
-
-	address := crypto.PubkeyToAddress(privateKey.PublicKey)
-	return account.URL.Path, address, nil
 }

@@ -3,23 +3,30 @@ package main
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
 )
 
 func main() {
+	// Example address (replace with your actual address)
+	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
 	// Create keystore signer (uses LightScryptConfig by default for testing)
-	_, err := ethsig.NewKeystoreSigner(
+	signer, err := ethsig.NewKeystoreSignerFromPath(
 		"/path/to/keystore/UTC--...",
+		address,
 		"your-password",
 		nil, // nil = use default LightScryptConfig (fast)
 	)
 	if err != nil {
 		panic(err)
 	}
+	defer signer.Close()
 
 	// For production, use StandardScryptConfig for higher security
-	productionSigner, err := ethsig.NewKeystoreSigner(
+	productionSigner, err := ethsig.NewKeystoreSignerFromPath(
 		"/path/to/keystore/UTC--...",
+		address,
 		"your-password",
 		&ethsig.StandardScryptConfig, // High security, slower
 	)
@@ -28,15 +35,5 @@ func main() {
 	}
 	defer productionSigner.Close()
 
-	// Or create a new keystore
-	newSigner, keystorePath, err := ethsig.CreateKeystore(
-		"/path/to/keystore/dir",
-		"your-password",
-		nil, // nil = LightScryptConfig
-	)
-	if err != nil {
-		panic(err)
-	}
-	defer newSigner.Close()
-	fmt.Printf("Created keystore at: %s\n", keystorePath)
+	fmt.Printf("Signer address: %s\n", signer.GetAddress().Hex())
 }

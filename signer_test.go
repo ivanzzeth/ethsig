@@ -602,13 +602,13 @@ func TestSignerClose(t *testing.T) {
 		keystoreDir := t.TempDir()
 		password := "test-password-123"
 
-		keystorePath, _, err := createTestKeystore(keystoreDir, password)
+		keystorePath, address, err := createTestKeystore(keystoreDir, password)
 		if err != nil {
 			t.Fatalf("Failed to create test keystore: %v", err)
 		}
 
 		// Create keystore signer
-		keystoreSigner, err := NewKeystoreSigner(keystorePath, password, nil)
+		keystoreSigner, err := NewKeystoreSignerFromPath(keystorePath, address, password, nil)
 		if err != nil {
 			t.Fatalf("Failed to create keystore signer: %v", err)
 		}

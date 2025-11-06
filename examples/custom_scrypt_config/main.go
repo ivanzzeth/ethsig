@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
 )
 
@@ -12,14 +13,17 @@ func main() {
 	}
 
 	keystorePath := "/path/to/keystore/UTC--..."
+	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	password := "your-password"
 
-	_, err := ethsig.NewKeystoreSigner(
+	signer, err := ethsig.NewKeystoreSignerFromPath(
 		keystorePath,
+		address,
 		password,
 		&customConfig,
 	)
 	if err != nil {
 		panic(err)
 	}
+	defer signer.Close()
 }
