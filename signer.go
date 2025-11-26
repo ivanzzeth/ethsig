@@ -119,7 +119,16 @@ func (s *Signer) SignTransactionWithChainID(tx *types.Transaction, chainID *big.
 // This method checks if the underlying signer implements a Close() method and calls it
 // It should be called when the signer is no longer needed
 func (s *Signer) Close() error {
-	// Check if underlying signer has Close method
+	// Check for Close method with error return (preferred)
+	type closerWithError interface {
+		Close() error
+	}
+
+	if c, ok := s.signer.(closerWithError); ok {
+		return c.Close()
+	}
+
+	// Check if underlying signer has Close method without error return (legacy support)
 	type closer interface {
 		Close()
 	}
@@ -127,15 +136,6 @@ func (s *Signer) Close() error {
 	if c, ok := s.signer.(closer); ok {
 		c.Close()
 		return nil
-	}
-
-	// Check for Close method with error return
-	type closerWithError interface {
-		Close() error
-	}
-
-	if c, ok := s.signer.(closerWithError); ok {
-		return c.Close()
 	}
 
 	// No Close method - nothing to do

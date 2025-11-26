@@ -674,6 +674,7 @@ type testSignerWithClose struct {
 	closed bool
 }
 
-func (s *testSignerWithClose) Close() {
+func (s *testSignerWithClose) Close() error {
 	s.closed = true
+	return nil
 }

@@ -17,6 +17,7 @@ import (
 var (
 	// Verify KeystoreSigner implements all required interfaces
 	_ AddressGetter     = (*KeystoreSigner)(nil)
+	_ RawMessageSigner  = (*KeystoreSigner)(nil)
 	_ HashSigner        = (*KeystoreSigner)(nil)
 	_ EIP191Signer      = (*KeystoreSigner)(nil)
 	_ PersonalSigner    = (*KeystoreSigner)(nil)
@@ -245,11 +246,7 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
-	if len(signature) == 65 && signature[64] < 27 {
-		signature[64] += 27
-	}
-
-	return signature, nil
+	return NormalizeSignatureV(signature), nil
 }
 
 // SignRawMessage signs raw message bytes
@@ -262,11 +259,7 @@ func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
-	if len(signature) == 65 && signature[64] < 27 {
-		signature[64] += 27
-	}
-
-	return signature, nil
+	return NormalizeSignatureV(signature), nil
 }
 
 // SignHash signs the hashed data using the private key
@@ -278,11 +271,7 @@ func (s *KeystoreSigner) SignHash(hashedData common.Hash) ([]byte, error) {
 
 	// keystore.SignHashWithPassphrase returns signature with V in [0,1] range
 	// We need to adjust it to Ethereum's [27,28] range
-	if len(signature) == 65 && signature[64] < 27 {
-		signature[64] += 27
-	}
-
-	return signature, nil
+	return NormalizeSignatureV(signature), nil
 }
 
 // SignTypedData implements EIP-712 typed data signing
@@ -314,9 +303,10 @@ func (s *KeystoreSigner) SignTransactionWithChainID(tx *types.Transaction, chain
 
 // Close securely cleans up sensitive data from memory
 // This should be called when the signer is no longer needed
-func (s *KeystoreSigner) Close() {
+func (s *KeystoreSigner) Close() error {
 	if s.password != nil {
 		s.password.Zeroize()
 		s.password = nil
 	}
+	return nil
 }
