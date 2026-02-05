@@ -1,6 +1,7 @@
 package keystore
 
 import (
+	"context"
 	"testing"
 )
 
@@ -75,7 +76,7 @@ func TestReadSecret_NotTerminal(t *testing.T) {
 		t.Skip("Skipping test: stdin is a terminal")
 	}
 
-	_, err := ReadSecret()
+	_, err := ReadSecret(context.Background())
 	if err == nil {
 		t.Error("ReadSecret should return error when stdin is not a terminal")
 	}
@@ -90,7 +91,7 @@ func TestReadPasswordWithConfirm_NotTerminal(t *testing.T) {
 		t.Skip("Skipping test: stdin is a terminal")
 	}
 
-	_, err := ReadPasswordWithConfirm("Enter password")
+	_, err := ReadPasswordWithConfirm(context.Background(), "Enter password")
 	if err == nil {
 		t.Error("ReadPasswordWithConfirm should return error when stdin is not a terminal")
 	}

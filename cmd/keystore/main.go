@@ -35,7 +35,7 @@ The password will be requested interactively (typed twice for confirmation).`,
 			return fmt.Errorf("this command requires interactive terminal input")
 		}
 
-		password, err := keystore.ReadPasswordWithConfirm("Enter password for new keystore")
+		password, err := keystore.ReadPasswordWithConfirm(cmd.Context(), "Enter password for new keystore")
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ Both the private key and password will be requested interactively.`,
 		}
 
 		fmt.Print("Enter private key (hex, will not echo): ")
-		privateKey, err := keystore.ReadSecret()
+		privateKey, err := keystore.ReadSecret(cmd.Context())
 		if err != nil {
 			return err
 		}
@@ -79,7 +79,7 @@ Both the private key and password will be requested interactively.`,
 			return fmt.Errorf("private key cannot be empty")
 		}
 
-		password, err := keystore.ReadPasswordWithConfirm("Enter password for keystore")
+		password, err := keystore.ReadPasswordWithConfirm(cmd.Context(), "Enter password for keystore")
 		if err != nil {
 			return err
 		}
@@ -120,13 +120,13 @@ Both current and new passwords will be requested interactively.`,
 		fmt.Printf("Changing password for keystore: %s\n", address)
 
 		fmt.Print("Enter current password: ")
-		currentPassword, err := keystore.ReadSecret()
+		currentPassword, err := keystore.ReadSecret(cmd.Context())
 		if err != nil {
 			return err
 		}
 		defer keystore.SecureZeroize(currentPassword)
 
-		newPassword, err := keystore.ReadPasswordWithConfirm("Enter new password")
+		newPassword, err := keystore.ReadPasswordWithConfirm(cmd.Context(), "Enter new password")
 		if err != nil {
 			return err
 		}
@@ -213,7 +213,7 @@ This is useful for testing if you remember the correct password.`,
 		fmt.Printf("Verifying password for: %s\n", address)
 
 		fmt.Print("Enter password: ")
-		password, err := keystore.ReadSecret()
+		password, err := keystore.ReadSecret(cmd.Context())
 		if err != nil {
 			return err
 		}

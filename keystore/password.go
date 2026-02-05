@@ -23,16 +23,10 @@ var (
 	ErrContextCanceled = errors.New("password reading canceled by context")
 )
 
-// ReadSecret reads a secret from stdin without echoing.
-// Returns error if stdin is not a terminal to prevent insecure piping.
-func ReadSecret() ([]byte, error) {
-	return ReadSecretWithContext(context.Background())
-}
-
-// ReadSecretWithContext reads a secret from stdin without echoing, with context support.
+// ReadSecret reads a secret from stdin without echoing, with context support.
 // Returns error if stdin is not a terminal to prevent insecure piping.
 // If context is canceled, returns ErrContextCanceled.
-func ReadSecretWithContext(ctx context.Context) ([]byte, error) {
+func ReadSecret(ctx context.Context) ([]byte, error) {
 	fd := int(syscall.Stdin)
 	if !term.IsTerminal(fd) {
 		return nil, ErrNotTerminal
@@ -91,9 +85,9 @@ func ReadSecretWithContext(ctx context.Context) ([]byte, error) {
 
 // ReadPasswordWithConfirm reads a password twice for confirmation.
 // Returns error if passwords don't match or if stdin is not a terminal.
-func ReadPasswordWithConfirm(prompt string) ([]byte, error) {
+func ReadPasswordWithConfirm(ctx context.Context, prompt string) ([]byte, error) {
 	fmt.Printf("%s: ", prompt)
-	password1, err := ReadSecret()
+	password1, err := ReadSecret(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +97,7 @@ func ReadPasswordWithConfirm(prompt string) ([]byte, error) {
 	}
 
 	fmt.Print("Confirm password: ")
-	password2, err := ReadSecret()
+	password2, err := ReadSecret(ctx)
 	if err != nil {
 		SecureZeroize(password1)
 		return nil, err
