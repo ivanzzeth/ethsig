@@ -38,6 +38,24 @@ func ReadSecretWithContext(ctx context.Context) ([]byte, error) {
 		return nil, ErrNotTerminal
 	}
 
+	// Save terminal state before reading password
+	// term.ReadPassword will modify terminal state, so we need to restore it
+	// if context is canceled before ReadPassword completes
+	oldState, err := term.GetState(fd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get terminal state: %w", err)
+	}
+
+	// Ensure terminal state is always restored on exit
+	// This is critical: if context is canceled, we must restore terminal state immediately
+	// without waiting for ReadPassword to complete (which may never happen)
+	defer func() {
+		if restoreErr := term.Restore(fd, oldState); restoreErr != nil {
+			// Log but don't fail - terminal might already be restored
+			_ = restoreErr
+		}
+	}()
+
 	// Use a channel to communicate between goroutines
 	type result struct {
 		password []byte
@@ -54,11 +72,15 @@ func ReadSecretWithContext(ctx context.Context) ([]byte, error) {
 	// Wait for either context cancellation or password reading completion
 	select {
 	case <-ctx.Done():
-		// Context was canceled - we can't actually interrupt term.ReadPassword,
-		// but we can return early. The goroutine will continue running but
-		// its result will be discarded.
+		// Context was canceled - immediately restore terminal state and return
+		// We don't wait for ReadPassword to complete because:
+		// 1. It may never complete (user pressed Ctrl+C, it's still waiting for input)
+		// 2. The defer will restore terminal state immediately when we return
+		// 3. The goroutine will continue running but its result will be discarded
 		return nil, fmt.Errorf("%w: %v", ErrContextCanceled, ctx.Err())
 	case res := <-resultCh:
+		// ReadPassword completed normally
+		// Terminal state will be restored by defer (though ReadPassword may have already restored it)
 		if res.err != nil {
 			return nil, fmt.Errorf("failed to read password: %w", res.err)
 		}
