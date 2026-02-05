@@ -1,6 +1,7 @@
 package keystore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
@@ -17,23 +18,53 @@ var (
 
 	// ErrEmptyPassword is returned when password is empty
 	ErrEmptyPassword = errors.New("password cannot be empty")
+
+	// ErrContextCanceled is returned when context is canceled during password reading
+	ErrContextCanceled = errors.New("password reading canceled by context")
 )
 
 // ReadSecret reads a secret from stdin without echoing.
 // Returns error if stdin is not a terminal to prevent insecure piping.
 func ReadSecret() ([]byte, error) {
+	return ReadSecretWithContext(context.Background())
+}
+
+// ReadSecretWithContext reads a secret from stdin without echoing, with context support.
+// Returns error if stdin is not a terminal to prevent insecure piping.
+// If context is canceled, returns ErrContextCanceled.
+func ReadSecretWithContext(ctx context.Context) ([]byte, error) {
 	fd := int(syscall.Stdin)
 	if !term.IsTerminal(fd) {
 		return nil, ErrNotTerminal
 	}
 
-	password, err := term.ReadPassword(fd)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read password: %w", err)
+	// Use a channel to communicate between goroutines
+	type result struct {
+		password []byte
+		err      error
 	}
-	fmt.Println() // newline after password input
+	resultCh := make(chan result, 1)
 
-	return password, nil
+	// Read password in a goroutine so we can cancel it
+	go func() {
+		password, err := term.ReadPassword(fd)
+		resultCh <- result{password: password, err: err}
+	}()
+
+	// Wait for either context cancellation or password reading completion
+	select {
+	case <-ctx.Done():
+		// Context was canceled - we can't actually interrupt term.ReadPassword,
+		// but we can return early. The goroutine will continue running but
+		// its result will be discarded.
+		return nil, fmt.Errorf("%w: %v", ErrContextCanceled, ctx.Err())
+	case res := <-resultCh:
+		if res.err != nil {
+			return nil, fmt.Errorf("failed to read password: %w", res.err)
+		}
+		fmt.Println() // newline after password input
+		return res.password, nil
+	}
 }
 
 // ReadPasswordWithConfirm reads a password twice for confirmation.
