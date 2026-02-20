@@ -25,56 +25,51 @@ var (
 
 // ReadSecret reads a secret from stdin without echoing, with context support.
 // Returns error if stdin is not a terminal to prevent insecure piping.
-// If context is canceled, returns ErrContextCanceled.
+// If context is canceled, it restores terminal state, unblocks the internal
+// ReadPassword goroutine, and waits for it to exit before returning.
 func ReadSecret(ctx context.Context) ([]byte, error) {
 	fd := int(syscall.Stdin)
 	if !term.IsTerminal(fd) {
 		return nil, ErrNotTerminal
 	}
 
-	// Save terminal state before reading password
-	// term.ReadPassword will modify terminal state, so we need to restore it
-	// if context is canceled before ReadPassword completes
+	// Save terminal state before reading password.
+	// term.ReadPassword puts the terminal into raw mode; we must be able
+	// to restore no matter how we exit.
 	oldState, err := term.GetState(fd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get terminal state: %w", err)
 	}
 
-	// Ensure terminal state is always restored on exit
-	// This is critical: if context is canceled, we must restore terminal state immediately
-	// without waiting for ReadPassword to complete (which may never happen)
-	defer func() {
-		if restoreErr := term.Restore(fd, oldState); restoreErr != nil {
-			// Log but don't fail - terminal might already be restored
-			_ = restoreErr
-		}
-	}()
-
-	// Use a channel to communicate between goroutines
 	type result struct {
 		password []byte
 		err      error
 	}
 	resultCh := make(chan result, 1)
 
-	// Read password in a goroutine so we can cancel it
 	go func() {
 		password, err := term.ReadPassword(fd)
 		resultCh <- result{password: password, err: err}
 	}()
 
-	// Wait for either context cancellation or password reading completion
 	select {
 	case <-ctx.Done():
-		// Context was canceled - immediately restore terminal state and return
-		// We don't wait for ReadPassword to complete because:
-		// 1. It may never complete (user pressed Ctrl+C, it's still waiting for input)
-		// 2. The defer will restore terminal state immediately when we return
-		// 3. The goroutine will continue running but its result will be discarded
+		// Context canceled while ReadPassword is blocking in raw mode.
+		// Steps to clean up safely:
+		//  1. Restore terminal state (exits raw mode so the read unblocks or
+		//     at least stops altering the terminal after we return).
+		//  2. Write a newline to stdin to unblock the blocked read syscall
+		//     inside term.ReadPassword, so the goroutine can finish.
+		//  3. Wait for the goroutine to send its result, preventing a leak.
+		_ = term.Restore(fd, oldState)
+		_, _ = syscall.Write(fd, []byte("\n"))
+		<-resultCh
 		return nil, fmt.Errorf("%w: %v", ErrContextCanceled, ctx.Err())
+
 	case res := <-resultCh:
-		// ReadPassword completed normally
-		// Terminal state will be restored by defer (though ReadPassword may have already restored it)
+		// ReadPassword completed (user pressed Enter or an error occurred).
+		// Restore terminal state in case ReadPassword left it modified.
+		_ = term.Restore(fd, oldState)
 		if res.err != nil {
 			return nil, fmt.Errorf("failed to read password: %w", res.err)
 		}
