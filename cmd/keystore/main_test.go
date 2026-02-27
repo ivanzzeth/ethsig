@@ -30,7 +30,7 @@ func TestRootCommand(t *testing.T) {
 
 func TestSubcommands(t *testing.T) {
 	subcommands := rootCmd.Commands()
-	expectedCommands := []string{"create", "import", "change-password", "list", "show", "verify"}
+	expectedCommands := []string{"create", "import", "change-password", "list", "show", "verify", "hdwallet"}
 
 	commandMap := make(map[string]*cobra.Command)
 	for _, cmd := range subcommands {
@@ -255,7 +255,256 @@ func TestKeystoreFlagRequired(t *testing.T) {
 
 func TestCommandHelp(t *testing.T) {
 	// Test that help doesn't panic
-	cmds := []*cobra.Command{createCmd, importCmd, changePasswordCmd, listCmd, showCmd, verifyCmd}
+	cmds := []*cobra.Command{createCmd, importCmd, changePasswordCmd, listCmd, showCmd, verifyCmd, hdwalletCmd}
+	for _, cmd := range cmds {
+		t.Run(cmd.Use, func(t *testing.T) {
+			help := cmd.UsageString()
+			if help == "" {
+				t.Error("UsageString should not be empty")
+			}
+		})
+	}
+}
+
+// --- HD wallet command tests ---
+
+func TestHDWalletCommand(t *testing.T) {
+	if hdwalletCmd == nil {
+		t.Fatal("hdwalletCmd should not be nil")
+	}
+
+	if hdwalletCmd.Use != "hdwallet" {
+		t.Errorf("hdwalletCmd.Use = %q, want %q", hdwalletCmd.Use, "hdwallet")
+	}
+
+	if hdwalletCmd.Short == "" {
+		t.Error("hdwalletCmd.Short should not be empty")
+	}
+
+	if hdwalletCmd.Long == "" {
+		t.Error("hdwalletCmd.Long should not be empty")
+	}
+}
+
+func TestHDWalletSubcommands(t *testing.T) {
+	subcommands := hdwalletCmd.Commands()
+	expectedCommands := []string{"create", "import", "list", "derive", "info", "verify", "export-mnemonic"}
+
+	commandMap := make(map[string]*cobra.Command)
+	for _, cmd := range subcommands {
+		commandMap[cmd.Use] = cmd
+	}
+
+	for _, expected := range expectedCommands {
+		if _, exists := commandMap[expected]; !exists {
+			t.Errorf("Expected hdwallet subcommand %q not found", expected)
+		}
+	}
+}
+
+func TestHDWalletCreateCommand(t *testing.T) {
+	if hdwalletCreateCmd == nil {
+		t.Fatal("hdwalletCreateCmd should not be nil")
+	}
+
+	if hdwalletCreateCmd.Use != "create" {
+		t.Errorf("hdwalletCreateCmd.Use = %q, want %q", hdwalletCreateCmd.Use, "create")
+	}
+
+	if hdwalletCreateCmd.Short == "" {
+		t.Error("hdwalletCreateCmd.Short should not be empty")
+	}
+
+	if hdwalletCreateCmd.RunE == nil {
+		t.Error("hdwalletCreateCmd.RunE should not be nil")
+	}
+
+	// Test flags
+	dirFlag := hdwalletCreateCmd.Flags().Lookup("dir")
+	if dirFlag == nil {
+		t.Error("hdwalletCreateCmd should have --dir flag")
+	}
+	if dirFlag.Shorthand != "d" {
+		t.Errorf("dir flag shorthand = %q, want %q", dirFlag.Shorthand, "d")
+	}
+	if dirFlag.DefValue != "./hdwallets" {
+		t.Errorf("dir default = %q, want %q", dirFlag.DefValue, "./hdwallets")
+	}
+
+	entropyFlag := hdwalletCreateCmd.Flags().Lookup("entropy")
+	if entropyFlag == nil {
+		t.Error("hdwalletCreateCmd should have --entropy flag")
+	}
+	if entropyFlag.DefValue != "128" {
+		t.Errorf("entropy default = %q, want %q", entropyFlag.DefValue, "128")
+	}
+}
+
+func TestHDWalletImportCommand(t *testing.T) {
+	if hdwalletImportCmd == nil {
+		t.Fatal("hdwalletImportCmd should not be nil")
+	}
+
+	if hdwalletImportCmd.Use != "import" {
+		t.Errorf("hdwalletImportCmd.Use = %q, want %q", hdwalletImportCmd.Use, "import")
+	}
+
+	if hdwalletImportCmd.Short == "" {
+		t.Error("hdwalletImportCmd.Short should not be empty")
+	}
+
+	if hdwalletImportCmd.RunE == nil {
+		t.Error("hdwalletImportCmd.RunE should not be nil")
+	}
+
+	dirFlag := hdwalletImportCmd.Flags().Lookup("dir")
+	if dirFlag == nil {
+		t.Error("hdwalletImportCmd should have --dir flag")
+	}
+}
+
+func TestHDWalletListCommand(t *testing.T) {
+	if hdwalletListCmd == nil {
+		t.Fatal("hdwalletListCmd should not be nil")
+	}
+
+	if hdwalletListCmd.Use != "list" {
+		t.Errorf("hdwalletListCmd.Use = %q, want %q", hdwalletListCmd.Use, "list")
+	}
+
+	if hdwalletListCmd.Short == "" {
+		t.Error("hdwalletListCmd.Short should not be empty")
+	}
+
+	if hdwalletListCmd.RunE == nil {
+		t.Error("hdwalletListCmd.RunE should not be nil")
+	}
+
+	dirFlag := hdwalletListCmd.Flags().Lookup("dir")
+	if dirFlag == nil {
+		t.Error("hdwalletListCmd should have --dir flag")
+	}
+	if dirFlag.Shorthand != "d" {
+		t.Errorf("dir flag shorthand = %q, want %q", dirFlag.Shorthand, "d")
+	}
+	if dirFlag.DefValue != "./hdwallets" {
+		t.Errorf("dir default = %q, want %q", dirFlag.DefValue, "./hdwallets")
+	}
+}
+
+func TestHDWalletDeriveCommand(t *testing.T) {
+	if hdwalletDeriveCmd == nil {
+		t.Fatal("hdwalletDeriveCmd should not be nil")
+	}
+
+	if hdwalletDeriveCmd.Use != "derive" {
+		t.Errorf("hdwalletDeriveCmd.Use = %q, want %q", hdwalletDeriveCmd.Use, "derive")
+	}
+
+	if hdwalletDeriveCmd.Short == "" {
+		t.Error("hdwalletDeriveCmd.Short should not be empty")
+	}
+
+	if hdwalletDeriveCmd.RunE == nil {
+		t.Error("hdwalletDeriveCmd.RunE should not be nil")
+	}
+
+	walletFlag := hdwalletDeriveCmd.Flags().Lookup("wallet")
+	if walletFlag == nil {
+		t.Error("hdwalletDeriveCmd should have --wallet flag")
+	}
+	if walletFlag.Shorthand != "w" {
+		t.Errorf("wallet flag shorthand = %q, want %q", walletFlag.Shorthand, "w")
+	}
+
+	startFlag := hdwalletDeriveCmd.Flags().Lookup("start")
+	if startFlag == nil {
+		t.Error("hdwalletDeriveCmd should have --start flag")
+	}
+	if startFlag.DefValue != "0" {
+		t.Errorf("start default = %q, want %q", startFlag.DefValue, "0")
+	}
+
+	endFlag := hdwalletDeriveCmd.Flags().Lookup("end")
+	if endFlag == nil {
+		t.Error("hdwalletDeriveCmd should have --end flag")
+	}
+	if endFlag.DefValue != "10" {
+		t.Errorf("end default = %q, want %q", endFlag.DefValue, "10")
+	}
+}
+
+func TestHDWalletInfoCommand(t *testing.T) {
+	if hdwalletInfoCmd == nil {
+		t.Fatal("hdwalletInfoCmd should not be nil")
+	}
+
+	if hdwalletInfoCmd.Use != "info" {
+		t.Errorf("hdwalletInfoCmd.Use = %q, want %q", hdwalletInfoCmd.Use, "info")
+	}
+
+	if hdwalletInfoCmd.Short == "" {
+		t.Error("hdwalletInfoCmd.Short should not be empty")
+	}
+
+	if hdwalletInfoCmd.RunE == nil {
+		t.Error("hdwalletInfoCmd.RunE should not be nil")
+	}
+
+	walletFlag := hdwalletInfoCmd.Flags().Lookup("wallet")
+	if walletFlag == nil {
+		t.Error("hdwalletInfoCmd should have --wallet flag")
+	}
+}
+
+func TestHDWalletVerifyCommand(t *testing.T) {
+	if hdwalletVerifyCmd == nil {
+		t.Fatal("hdwalletVerifyCmd should not be nil")
+	}
+
+	if hdwalletVerifyCmd.Use != "verify" {
+		t.Errorf("hdwalletVerifyCmd.Use = %q, want %q", hdwalletVerifyCmd.Use, "verify")
+	}
+
+	if hdwalletVerifyCmd.Short == "" {
+		t.Error("hdwalletVerifyCmd.Short should not be empty")
+	}
+
+	if hdwalletVerifyCmd.RunE == nil {
+		t.Error("hdwalletVerifyCmd.RunE should not be nil")
+	}
+
+	walletFlag := hdwalletVerifyCmd.Flags().Lookup("wallet")
+	if walletFlag == nil {
+		t.Error("hdwalletVerifyCmd should have --wallet flag")
+	}
+}
+
+func TestHDWalletExportMnemonicCommand(t *testing.T) {
+	if hdwalletExportMnemonicCmd == nil {
+		t.Fatal("hdwalletExportMnemonicCmd should not be nil")
+	}
+
+	if hdwalletExportMnemonicCmd.Use != "export-mnemonic" {
+		t.Errorf("hdwalletExportMnemonicCmd.Use = %q, want %q", hdwalletExportMnemonicCmd.Use, "export-mnemonic")
+	}
+
+	if hdwalletExportMnemonicCmd.Short == "" {
+		t.Error("hdwalletExportMnemonicCmd.Short should not be empty")
+	}
+
+	if hdwalletExportMnemonicCmd.RunE == nil {
+		t.Error("hdwalletExportMnemonicCmd.RunE should not be nil")
+	}
+
+	walletFlag := hdwalletExportMnemonicCmd.Flags().Lookup("wallet")
+	if walletFlag == nil {
+		t.Error("hdwalletExportMnemonicCmd should have --wallet flag")
+	}
+}
+
+func TestHDWalletCommandHelp(t *testing.T) {
+	cmds := []*cobra.Command{hdwalletCreateCmd, hdwalletImportCmd, hdwalletListCmd, hdwalletDeriveCmd, hdwalletInfoCmd, hdwalletVerifyCmd, hdwalletExportMnemonicCmd}
 	for _, cmd := range cmds {
 		t.Run(cmd.Use, func(t *testing.T) {
 			help := cmd.UsageString()

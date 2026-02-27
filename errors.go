@@ -64,6 +64,16 @@ var (
 	ErrConfigurationInvalid     = errors.New("invalid configuration")
 	ErrParameterMissing         = errors.New("required parameter missing")
 	ErrParameterInvalid         = errors.New("invalid parameter value")
+
+	// HD wallet errors
+	ErrHDWalletAlreadyExists    = errors.New("HD wallet already exists")
+	ErrHDWalletNotFound         = errors.New("HD wallet file not found")
+	ErrHDWalletDecryptFailed    = errors.New("HD wallet decryption failed")
+	ErrHDWalletInvalidVersion   = errors.New("unsupported HD wallet version")
+	ErrMnemonicInvalid          = errors.New("invalid BIP-39 mnemonic")
+	ErrHDWalletClosed           = errors.New("HD wallet is closed")
+	ErrHDDerivationFailed       = errors.New("HD key derivation failed")
+	ErrInvalidDerivationRange   = errors.New("invalid derivation range: start must be less than end")
 )
 
 // Error types for better error categorization
@@ -80,6 +90,7 @@ const (
 	ErrorTypeEIP712
 	ErrorTypeAuthorization
 	ErrorTypeConfiguration
+	ErrorTypeHDWallet
 )
 
 // TypedError represents a categorized error with additional context
@@ -228,6 +239,19 @@ func IsAuthorizationError(err error) bool {
 func IsConfigurationError(err error) bool {
 	if typedErr, ok := err.(*TypedError); ok {
 		return typedErr.Type == ErrorTypeConfiguration
+	}
+	return false
+}
+
+// NewHDWalletError creates an HD wallet-related error
+func NewHDWalletError(message string, cause error) *TypedError {
+	return NewTypedError(ErrorTypeHDWallet, message, cause)
+}
+
+// IsHDWalletError checks if an error is HD wallet-related
+func IsHDWalletError(err error) bool {
+	if typedErr, ok := err.(*TypedError); ok {
+		return typedErr.Type == ErrorTypeHDWallet
 	}
 	return false
 }
