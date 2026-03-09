@@ -79,6 +79,7 @@ go install github.com/ivanzzeth/ethsig/cmd/keystore@latest
 |------|--------|-----------|
 | `secp256k1` (default) | Native go-ethereum keystore (`UTC--...`) | Ethereum address |
 | `ed25519` | Enhanced keystore (`ed25519--{pubkey}.json`) | Public key hex |
+| `p256` | Enhanced keystore (`p256--{compressed_pubkey}.json`) | Compressed public key hex |
 
 ### Commands
 
@@ -90,6 +91,9 @@ keystore create -d ./keystores
 
 # ed25519
 keystore create -d ./keystores --key-type ed25519 --label "my-auth-key"
+
+# p256 (secp256r1, for passkeys/WebAuthn/JWT ES256)
+keystore create -d ./keystores --key-type p256 --label "my-passkey"
 ```
 
 #### Import an existing key
@@ -163,9 +167,9 @@ keystore hdwallet export-mnemonic -w ./hdwallets/hdwallet--0x123.json
 }
 ```
 
-### secp256k1 Curve Order Validation
+### Curve Order Validation
 
-All key types are validated against the secp256k1 curve order N at import/create time. The probability of an ed25519 key exceeding N is negligible (~2^-128), but if it occurs the tool reports an error and the user can regenerate.
+All key types are validated against the secp256k1 curve order N at import/create time. P-256 keys are additionally validated against the P-256 curve order N (which is smaller than secp256k1 N). The probability of a random key exceeding N is negligible (~2^-128), but if it occurs the tool reports an error and the user can regenerate.
 
 ## Interfaces
 

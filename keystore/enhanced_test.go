@@ -1,7 +1,9 @@
 package keystore
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,6 +16,14 @@ import (
 
 // testEd25519Seed is a known 32-byte seed for testing (DO NOT use in production).
 var testEd25519Seed = []byte{
+	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+	0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+	0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+}
+
+// testP256Key is a known 32-byte P-256 private key for testing (DO NOT use in production).
+var testP256Key = []byte{
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 	0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
 	0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
@@ -47,6 +57,27 @@ func TestValidateKeyBytes_Secp256k1_Valid(t *testing.T) {
 	keyBytes, _ := hex.DecodeString("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 	if err := ValidateKeyBytes(keyBytes, KeyTypeSecp256k1); err != nil {
 		t.Errorf("expected valid secp256k1 key, got: %v", err)
+	}
+}
+
+func TestValidateKeyBytes_P256_Valid(t *testing.T) {
+	if err := ValidateKeyBytes(testP256Key, KeyTypeP256); err != nil {
+		t.Errorf("expected valid p256 key, got: %v", err)
+	}
+}
+
+func TestValidateKeyBytes_P256_WrongSize(t *testing.T) {
+	short := make([]byte, 16)
+	if err := ValidateKeyBytes(short, KeyTypeP256); err == nil {
+		t.Error("expected error for wrong size p256 key")
+	}
+}
+
+func TestValidateKeyBytes_P256_ExceedsP256N(t *testing.T) {
+	// P-256 order N
+	nBytes := elliptic.P256().Params().N.Bytes()
+	if err := ValidateKeyBytes(nBytes, KeyTypeP256); err == nil {
+		t.Error("expected error for key >= P-256 N")
 	}
 }
 
@@ -1166,6 +1197,407 @@ func TestImportEnhancedKey_FromFile_Hex(t *testing.T) {
 		t.Error("file import round-trip failed")
 	}
 }
+
+// --- P-256 CreateEnhancedKey tests ---
+
+func TestCreateEnhancedKey_P256(t *testing.T) {
+	dir := t.TempDir()
+
+	identifier, path, err := CreateEnhancedKey(dir, KeyTypeP256, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("CreateEnhancedKey P256 failed: %v", err)
+	}
+
+	if identifier == "" {
+		t.Error("identifier should not be empty")
+	}
+
+	// P-256 compressed public key: 0x02/0x03 + 32 bytes = 33 bytes = 66 hex chars
+	// Or uncompressed: 0x04 + 32 + 32 = 65 bytes = 130 hex chars
+	if len(identifier) == 0 {
+		t.Error("identifier should not be empty")
+	}
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Errorf("P256 key file does not exist at %s", path)
+	}
+
+	info, err := GetEnhancedKeyInfo(path)
+	if err != nil {
+		t.Fatalf("GetEnhancedKeyInfo failed: %v", err)
+	}
+	if info.KeyType != KeyTypeP256 {
+		t.Errorf("key type = %s, want %s", info.KeyType, KeyTypeP256)
+	}
+}
+
+func TestCreateEnhancedKey_P256_WithLabel(t *testing.T) {
+	dir := t.TempDir()
+
+	_, path, err := CreateEnhancedKey(dir, KeyTypeP256, testEnhancedPassword, "passkey-1")
+	if err != nil {
+		t.Fatalf("CreateEnhancedKey P256 failed: %v", err)
+	}
+
+	info, err := GetEnhancedKeyInfo(path)
+	if err != nil {
+		t.Fatalf("GetEnhancedKeyInfo failed: %v", err)
+	}
+	if info.Label != "passkey-1" {
+		t.Errorf("label = %q, want %q", info.Label, "passkey-1")
+	}
+}
+
+// --- P-256 ImportEnhancedKey tests ---
+
+func TestImportEnhancedKey_P256_Hex(t *testing.T) {
+	dir := t.TempDir()
+	hexInput := []byte(hex.EncodeToString(testP256Key))
+
+	identifier, path, err := ImportEnhancedKey(dir, hexInput, KeyTypeP256, KeyFormatHex, testEnhancedPassword, "p256-hex")
+	if err != nil {
+		t.Fatalf("ImportEnhancedKey P256 hex failed: %v", err)
+	}
+
+	if identifier == "" {
+		t.Error("identifier should not be empty")
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Errorf("file not created at %s", path)
+	}
+
+	if err := VerifyEnhancedKeyPassword(path, testEnhancedPassword); err != nil {
+		t.Errorf("VerifyEnhancedKeyPassword failed: %v", err)
+	}
+}
+
+func TestImportEnhancedKey_P256_Base64(t *testing.T) {
+	dir := t.TempDir()
+	b64Input := []byte(base64.StdEncoding.EncodeToString(testP256Key))
+
+	_, path, err := ImportEnhancedKey(dir, b64Input, KeyTypeP256, KeyFormatBase64, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("ImportEnhancedKey P256 base64 failed: %v", err)
+	}
+
+	if err := VerifyEnhancedKeyPassword(path, testEnhancedPassword); err != nil {
+		t.Errorf("VerifyEnhancedKeyPassword failed: %v", err)
+	}
+}
+
+func TestImportEnhancedKey_P256_PEM_PKCS8(t *testing.T) {
+	dir := t.TempDir()
+
+	ecdsaKey, err := p256PrivateKeyFromBytes(testP256Key)
+	if err != nil {
+		t.Fatalf("p256PrivateKeyFromBytes failed: %v", err)
+	}
+	derBytes, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey failed: %v", err)
+	}
+	pemInput := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: derBytes})
+
+	_, path, err := ImportEnhancedKey(dir, pemInput, KeyTypeP256, KeyFormatPEM, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("ImportEnhancedKey P256 PEM PKCS8 failed: %v", err)
+	}
+
+	if err := VerifyEnhancedKeyPassword(path, testEnhancedPassword); err != nil {
+		t.Errorf("VerifyEnhancedKeyPassword failed: %v", err)
+	}
+}
+
+func TestImportEnhancedKey_P256_PEM_SEC1(t *testing.T) {
+	dir := t.TempDir()
+
+	ecdsaKey, err := p256PrivateKeyFromBytes(testP256Key)
+	if err != nil {
+		t.Fatalf("p256PrivateKeyFromBytes failed: %v", err)
+	}
+	derBytes, err := x509.MarshalECPrivateKey(ecdsaKey)
+	if err != nil {
+		t.Fatalf("MarshalECPrivateKey failed: %v", err)
+	}
+	pemInput := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: derBytes})
+
+	_, path, err := ImportEnhancedKey(dir, pemInput, KeyTypeP256, KeyFormatPEM, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("ImportEnhancedKey P256 PEM SEC1 failed: %v", err)
+	}
+
+	if err := VerifyEnhancedKeyPassword(path, testEnhancedPassword); err != nil {
+		t.Errorf("VerifyEnhancedKeyPassword failed: %v", err)
+	}
+}
+
+// --- P-256 ExportEnhancedKey tests ---
+
+func TestExportEnhancedKey_P256_Hex(t *testing.T) {
+	dir := t.TempDir()
+	hexInput := []byte(hex.EncodeToString(testP256Key))
+
+	_, path, err := ImportEnhancedKey(dir, hexInput, KeyTypeP256, KeyFormatHex, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	exported, err := ExportEnhancedKey(path, testEnhancedPassword, KeyFormatHex)
+	if err != nil {
+		t.Fatalf("ExportEnhancedKey P256 hex failed: %v", err)
+	}
+
+	if string(exported) != hex.EncodeToString(testP256Key) {
+		t.Errorf("exported hex = %s, want %s", string(exported), hex.EncodeToString(testP256Key))
+	}
+}
+
+func TestExportEnhancedKey_P256_Base64(t *testing.T) {
+	dir := t.TempDir()
+	hexInput := []byte(hex.EncodeToString(testP256Key))
+
+	_, path, err := ImportEnhancedKey(dir, hexInput, KeyTypeP256, KeyFormatHex, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	exported, err := ExportEnhancedKey(path, testEnhancedPassword, KeyFormatBase64)
+	if err != nil {
+		t.Fatalf("ExportEnhancedKey P256 base64 failed: %v", err)
+	}
+
+	expected := base64.StdEncoding.EncodeToString(testP256Key)
+	if string(exported) != expected {
+		t.Errorf("exported base64 = %s, want %s", string(exported), expected)
+	}
+}
+
+func TestExportEnhancedKey_P256_PEM(t *testing.T) {
+	dir := t.TempDir()
+	hexInput := []byte(hex.EncodeToString(testP256Key))
+
+	_, path, err := ImportEnhancedKey(dir, hexInput, KeyTypeP256, KeyFormatHex, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	exported, err := ExportEnhancedKey(path, testEnhancedPassword, KeyFormatPEM)
+	if err != nil {
+		t.Fatalf("ExportEnhancedKey P256 PEM failed: %v", err)
+	}
+
+	// Verify PEM can be parsed back to original key
+	block, _ := pem.Decode(exported)
+	if block == nil {
+		t.Fatal("exported PEM is invalid")
+	}
+	privKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParsePKCS8PrivateKey failed: %v", err)
+	}
+	ecKey, ok := privKey.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatalf("expected *ecdsa.PrivateKey, got %T", privKey)
+	}
+	if ecKey.Curve != elliptic.P256() {
+		t.Error("exported PEM key is not on P-256 curve")
+	}
+	rawBytes := ecKey.D.FillBytes(make([]byte, 32))
+	if !bytesEqual(rawBytes, testP256Key) {
+		t.Errorf("PEM export key mismatch: got %x, want %x", rawBytes, testP256Key)
+	}
+}
+
+// --- P-256 round-trip tests ---
+
+func TestImportExportRoundTrip_P256_HexToBase64(t *testing.T) {
+	dir := t.TempDir()
+	hexInput := []byte(hex.EncodeToString(testP256Key))
+
+	_, path, err := ImportEnhancedKey(dir, hexInput, KeyTypeP256, KeyFormatHex, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	b64Output, err := ExportEnhancedKey(path, testEnhancedPassword, KeyFormatBase64)
+	if err != nil {
+		t.Fatalf("export base64 failed: %v", err)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(string(b64Output))
+	if err != nil {
+		t.Fatalf("base64 decode failed: %v", err)
+	}
+	if !bytesEqual(decoded, testP256Key) {
+		t.Error("P256 cross-format round-trip failed: hex -> base64")
+	}
+}
+
+func TestImportExportRoundTrip_P256_PEMToHex(t *testing.T) {
+	dir := t.TempDir()
+
+	ecdsaKey, err := p256PrivateKeyFromBytes(testP256Key)
+	if err != nil {
+		t.Fatalf("p256PrivateKeyFromBytes failed: %v", err)
+	}
+	derBytes, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey failed: %v", err)
+	}
+	pemInput := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: derBytes})
+
+	_, path, err := ImportEnhancedKey(dir, pemInput, KeyTypeP256, KeyFormatPEM, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("import PEM failed: %v", err)
+	}
+
+	hexOutput, err := ExportEnhancedKey(path, testEnhancedPassword, KeyFormatHex)
+	if err != nil {
+		t.Fatalf("export hex failed: %v", err)
+	}
+
+	expectedHex := hex.EncodeToString(testP256Key)
+	if string(hexOutput) != expectedHex {
+		t.Errorf("P256 round-trip PEM->hex: got %s, want %s", string(hexOutput), expectedHex)
+	}
+}
+
+func TestFormatKeyOutput_PEM_P256(t *testing.T) {
+	output, err := FormatKeyOutput(testP256Key, KeyFormatPEM, KeyTypeP256)
+	if err != nil {
+		t.Fatalf("FormatKeyOutput PEM P256 failed: %v", err)
+	}
+
+	block, _ := pem.Decode(output)
+	if block == nil {
+		t.Fatal("output is not valid PEM")
+	}
+	if block.Type != "PRIVATE KEY" {
+		t.Errorf("PEM type = %s, want PRIVATE KEY", block.Type)
+	}
+
+	privKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParsePKCS8PrivateKey failed: %v", err)
+	}
+	ecKey, ok := privKey.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatalf("expected *ecdsa.PrivateKey, got %T", privKey)
+	}
+	rawBytes := ecKey.D.FillBytes(make([]byte, 32))
+	if !bytesEqual(rawBytes, testP256Key) {
+		t.Error("PEM round-trip key mismatch")
+	}
+}
+
+func TestFormatRoundTrip_PEM_P256(t *testing.T) {
+	output, err := FormatKeyOutput(testP256Key, KeyFormatPEM, KeyTypeP256)
+	if err != nil {
+		t.Fatalf("FormatKeyOutput failed: %v", err)
+	}
+	parsed, err := ParseKeyInput(output, KeyFormatPEM, KeyTypeP256)
+	if err != nil {
+		t.Fatalf("ParseKeyInput failed: %v", err)
+	}
+	if !bytesEqual(parsed, testP256Key) {
+		t.Error("PEM P256 round-trip failed")
+	}
+}
+
+// --- P-256 deriveIdentifier test ---
+
+func TestDeriveIdentifier_P256(t *testing.T) {
+	id := deriveIdentifier(testP256Key, KeyTypeP256)
+	if len(id) == 0 {
+		t.Error("P256 identifier should not be empty")
+	}
+
+	// Identifier should be deterministic
+	id2 := deriveIdentifier(testP256Key, KeyTypeP256)
+	if id != id2 {
+		t.Error("P256 identifier should be deterministic")
+	}
+}
+
+// --- P-256 mixed directory test ---
+
+func TestListEnhancedKeys_MixedDir_P256AndEd25519(t *testing.T) {
+	dir := t.TempDir()
+
+	_, _, err := CreateEnhancedKey(dir, KeyTypeEd25519, testEnhancedPassword, "ed-key")
+	if err != nil {
+		t.Fatalf("CreateEnhancedKey ed25519 failed: %v", err)
+	}
+	_, _, err = CreateEnhancedKey(dir, KeyTypeP256, testEnhancedPassword, "p256-key")
+	if err != nil {
+		t.Fatalf("CreateEnhancedKey p256 failed: %v", err)
+	}
+	_, _, err = CreateKeystore(dir, testEnhancedPassword)
+	if err != nil {
+		t.Fatalf("CreateKeystore failed: %v", err)
+	}
+
+	keys, err := ListEnhancedKeys(dir)
+	if err != nil {
+		t.Fatalf("ListEnhancedKeys failed: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 enhanced keys, got %d", len(keys))
+	}
+
+	types := map[KeyType]bool{}
+	for _, k := range keys {
+		types[k.KeyType] = true
+	}
+	if !types[KeyTypeEd25519] {
+		t.Error("expected ed25519 key in list")
+	}
+	if !types[KeyTypeP256] {
+		t.Error("expected p256 key in list")
+	}
+
+	// Native keystores should not be included
+	keystores, err := ListKeystores(dir)
+	if err != nil {
+		t.Fatalf("ListKeystores failed: %v", err)
+	}
+	if len(keystores) != 1 {
+		t.Errorf("expected 1 native keystore, got %d", len(keystores))
+	}
+}
+
+// --- P-256 ChangePassword test ---
+
+func TestChangeEnhancedKeyPassword_P256(t *testing.T) {
+	dir := t.TempDir()
+	hexInput := []byte(hex.EncodeToString(testP256Key))
+
+	_, path, err := ImportEnhancedKey(dir, hexInput, KeyTypeP256, KeyFormatHex, testEnhancedPassword, "")
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	newPassword := []byte("new-p256-password")
+	if err := ChangeEnhancedKeyPassword(path, testEnhancedPassword, newPassword); err != nil {
+		t.Fatalf("ChangeEnhancedKeyPassword failed: %v", err)
+	}
+
+	// Old password should fail
+	if err := VerifyEnhancedKeyPassword(path, testEnhancedPassword); err == nil {
+		t.Error("old password should no longer work")
+	}
+
+	// Export with new password should return original key
+	exported, err := ExportEnhancedKey(path, newPassword, KeyFormatHex)
+	if err != nil {
+		t.Fatalf("export after password change failed: %v", err)
+	}
+	if string(exported) != hex.EncodeToString(testP256Key) {
+		t.Error("key data corrupted after password change")
+	}
+}
+
+// --- Edge case: fromFile simulation ---
 
 func TestImportEnhancedKey_FromFile_PEM(t *testing.T) {
 	dir := t.TempDir()

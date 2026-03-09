@@ -18,7 +18,7 @@ var rootCmd = &cobra.Command{
 	Long: `A command-line tool for managing encrypted keystores.
 
 Supports creating new keystores, importing private keys, changing passwords,
-and listing keystores. Supports multiple key types (secp256k1, ed25519) and
+and listing keystores. Supports multiple key types (secp256k1, ed25519, p256) and
 multiple formats (hex, base64, pem). All password input is done interactively for security.`,
 	Version: version,
 }
@@ -326,7 +326,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all keystores in a directory",
 	Long: `List all keystore files in the specified directory.
-Use --key-type to filter by key type (e.g., secp256k1, ed25519).
+Use --key-type to filter by key type (e.g., secp256k1, ed25519, p256).
 Without --key-type, all keystores are listed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := cmd.Flags().GetString("dir")
@@ -768,7 +768,7 @@ func init() {
 	if err := createCmd.MarkFlagRequired("dir"); err != nil {
 		panic(err)
 	}
-	createCmd.Flags().String("key-type", "secp256k1", "Key type: secp256k1, ed25519")
+	createCmd.Flags().String("key-type", "secp256k1", "Key type: secp256k1, ed25519, p256")
 	createCmd.Flags().String("label", "", "Label for the keystore (enhanced keystores only)")
 
 	// Import command flags
@@ -776,7 +776,7 @@ func init() {
 	if err := importCmd.MarkFlagRequired("dir"); err != nil {
 		panic(err)
 	}
-	importCmd.Flags().String("key-type", "secp256k1", "Key type: secp256k1, ed25519")
+	importCmd.Flags().String("key-type", "secp256k1", "Key type: secp256k1, ed25519, p256")
 	importCmd.Flags().String("format", "hex", "Input format: hex, base64, pem")
 	importCmd.Flags().String("from-file", "", "Read key from file instead of interactive input")
 	importCmd.Flags().String("label", "", "Label for the keystore (enhanced keystores only)")
@@ -799,7 +799,7 @@ func init() {
 	if err := listCmd.MarkFlagRequired("dir"); err != nil {
 		panic(err)
 	}
-	listCmd.Flags().String("key-type", "", "Filter by key type: secp256k1, ed25519 (empty = all)")
+	listCmd.Flags().String("key-type", "", "Filter by key type: secp256k1, ed25519, p256 (empty = all)")
 
 	// Show command flags
 	showCmd.Flags().StringP("keystore", "k", "", "Path to keystore file")

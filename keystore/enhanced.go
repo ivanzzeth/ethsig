@@ -1,7 +1,11 @@
 package keystore
 
 import (
+	"crypto/ecdh"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -28,6 +32,7 @@ type KeyType string
 const (
 	KeyTypeEd25519   KeyType = "ed25519"
 	KeyTypeSecp256k1 KeyType = "secp256k1"
+	KeyTypeP256      KeyType = "p256"
 )
 
 // KeyFormat represents the input/output format for private keys.
@@ -41,6 +46,9 @@ const (
 
 // secp256k1N is the order of the secp256k1 curve.
 var secp256k1N, _ = new(big.Int).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+
+// p256N is the order of the P-256 (secp256r1) curve.
+var p256N = elliptic.P256().Params().N
 
 // EnhancedKeyFile represents the encrypted enhanced key file on disk.
 type EnhancedKeyFile struct {
@@ -73,6 +81,10 @@ func ValidateKeyBytes(keyBytes []byte, keyType KeyType) error {
 		if len(keyBytes) != 32 {
 			return fmt.Errorf("secp256k1 key must be 32 bytes, got %d", len(keyBytes))
 		}
+	case KeyTypeP256:
+		if len(keyBytes) != 32 {
+			return fmt.Errorf("p256 key must be 32 bytes, got %d", len(keyBytes))
+		}
 	default:
 		return fmt.Errorf("unsupported key type: %s", keyType)
 	}
@@ -83,6 +95,9 @@ func ValidateKeyBytes(keyBytes []byte, keyType KeyType) error {
 	}
 	if keyInt.Cmp(secp256k1N) >= 0 {
 		return fmt.Errorf("key bytes exceed secp256k1 curve order; please regenerate the key")
+	}
+	if keyType == KeyTypeP256 && keyInt.Cmp(p256N) >= 0 {
+		return fmt.Errorf("key bytes exceed P-256 curve order; please regenerate the key")
 	}
 
 	return nil
@@ -122,9 +137,17 @@ func ParseKeyInput(input []byte, format KeyFormat, keyType KeyType) ([]byte, err
 			switch k := privKey.(type) {
 			case ed25519.PrivateKey:
 				return k.Seed(), nil
+			case *ecdsa.PrivateKey:
+				return k.D.FillBytes(make([]byte, (k.Curve.Params().BitSize+7)/8)), nil
 			default:
 				return nil, fmt.Errorf("unsupported PKCS8 key type: %T", privKey)
 			}
+		}
+
+		// Try SEC1 EC private key (BEGIN EC PRIVATE KEY)
+		ecKey, ecErr := x509.ParseECPrivateKey(block.Bytes)
+		if ecErr == nil {
+			return ecKey.D.FillBytes(make([]byte, (ecKey.Curve.Params().BitSize+7)/8)), nil
 		}
 
 		// Fall back to raw bytes from PEM block
@@ -157,8 +180,19 @@ func FormatKeyOutput(keyBytes []byte, format KeyFormat, keyType KeyType) ([]byte
 			}
 			pemType = "PRIVATE KEY"
 			derBytes = der
+		case KeyTypeP256:
+			ecdsaKey, ecdsaErr := p256PrivateKeyFromBytes(keyBytes)
+			if ecdsaErr != nil {
+				return nil, fmt.Errorf("failed to construct p256 private key: %w", ecdsaErr)
+			}
+			der, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal p256 key to PKCS8: %w", err)
+			}
+			pemType = "PRIVATE KEY"
+			derBytes = der
 		default:
-			// For non-ed25519, wrap raw bytes in a generic PEM block
+			// For other types, wrap raw bytes in a generic PEM block
 			pemType = "PRIVATE KEY"
 			derBytes = keyBytes
 		}
@@ -181,6 +215,13 @@ func deriveIdentifier(keyBytes []byte, keyType KeyType) string {
 		privKey := ed25519.NewKeyFromSeed(keyBytes)
 		pubKey := privKey.Public().(ed25519.PublicKey)
 		return hex.EncodeToString(pubKey)
+	case KeyTypeP256:
+		ecdhKey, err := ecdh.P256().NewPrivateKey(keyBytes)
+		if err != nil {
+			hash := sha256.Sum256(keyBytes)
+			return hex.EncodeToString(hash[:20])
+		}
+		return hex.EncodeToString(ecdhKey.PublicKey().Bytes())
 	default:
 		hash := sha256.Sum256(keyBytes)
 		return hex.EncodeToString(hash[:20])
@@ -211,6 +252,19 @@ func CreateEnhancedKey(dir string, keyType KeyType, password []byte, label strin
 			}
 			keyBytes = make([]byte, ed25519.SeedSize)
 			copy(keyBytes, privKey.Seed())
+			if ValidateKeyBytes(keyBytes, keyType) == nil {
+				break
+			}
+			SecureZeroize(keyBytes)
+		}
+	case KeyTypeP256:
+		for {
+			ecdhKey, genErr := ecdh.P256().GenerateKey(rand.Reader)
+			if genErr != nil {
+				return "", "", fmt.Errorf("failed to generate p256 key: %w", genErr)
+			}
+			keyBytes = make([]byte, 32)
+			copy(keyBytes, ecdhKey.Bytes())
 			if ValidateKeyBytes(keyBytes, keyType) == nil {
 				break
 			}
@@ -474,6 +528,29 @@ func writeEnhancedKeyFile(dir string, keyBytes []byte, keyType KeyType, password
 	}
 
 	return identifier, filePath, nil
+}
+
+// p256PrivateKeyFromBytes constructs an ecdsa.PrivateKey for P-256 from raw 32-byte scalar.
+func p256PrivateKeyFromBytes(keyBytes []byte) (*ecdsa.PrivateKey, error) {
+	ecdhKey, err := ecdh.P256().NewPrivateKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("invalid p256 key bytes: %w", err)
+	}
+	// Uncompressed public key: 0x04 || X (32 bytes) || Y (32 bytes)
+	pubBytes := ecdhKey.PublicKey().Bytes()
+	if len(pubBytes) != 65 || pubBytes[0] != 0x04 {
+		return nil, fmt.Errorf("unexpected p256 public key format")
+	}
+	x := new(big.Int).SetBytes(pubBytes[1:33])
+	y := new(big.Int).SetBytes(pubBytes[33:65])
+	return &ecdsa.PrivateKey{
+		PublicKey: ecdsa.PublicKey{
+			Curve: elliptic.P256(),
+			X:     x,
+			Y:     y,
+		},
+		D: new(big.Int).SetBytes(keyBytes),
+	}, nil
 }
 
 func readEnhancedKeyFile(filePath string) (*EnhancedKeyFile, error) {
