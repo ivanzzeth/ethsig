@@ -269,6 +269,46 @@ go tool cover -func=coverage.out
 go test -race ./...
 ```
 
+## Security
+
+### Git Hooks
+
+Install pre-commit and pre-push security hooks:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+**Pre-commit checks:**
+- Error suppression detection (`_ = xxx` forbidden)
+- `gosec` - static security analysis
+- `govulncheck` - dependency vulnerability scanning
+- `go vet` - code correctness
+- Plaintext secret detection
+- `gitleaks` - secret scanning in staged changes
+- Full test suite
+
+**Pre-push checks:**
+- Full test suite with race detection (`go test -race ./...`)
+
+### Security Audit
+
+Run a comprehensive security audit:
+
+```bash
+./scripts/security-audit.sh
+```
+
+Checks: govulncheck, gosec, go module integrity, outdated dependencies.
+
+### Required Tools
+
+```bash
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+go install golang.org/x/vuln/cmd/govulncheck@latest
+go install github.com/zricethezav/gitleaks/v8@latest
+```
+
 ## License
 
 MIT License - see LICENSE file for details
