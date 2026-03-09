@@ -15,6 +15,14 @@ A comprehensive Ethereum signature library for Go, providing secure signing oper
   - EIP-712 typed structured data
   - Ethereum transaction signing
 
+- **Multi-Key Keystore Management (CLI)**
+  - Native go-ethereum keystore for secp256k1 (fully backward compatible)
+  - Enhanced keystore for ed25519 and other key types
+  - Multiple input/output formats: hex, base64, PEM
+  - File-based import (`--from-file`)
+  - Key metadata: type, identifier, label
+  - BIP-39 HD wallet with key derivation
+
 - **Security Features**
   - Secure memory handling for sensitive data
   - Configurable encryption strength
@@ -54,6 +62,110 @@ See [examples/eip712_signing/main.go](examples/eip712_signing/main.go) for a com
 ### Transaction Signing
 
 See [examples/transaction_signing/main.go](examples/transaction_signing/main.go) for a complete example.
+
+## Keystore CLI
+
+A command-line tool for managing encrypted keystores. Supports multiple key types and formats.
+
+### Installation
+
+```bash
+go install github.com/ivanzzeth/ethsig/cmd/keystore@latest
+```
+
+### Key Types
+
+| Type | Format | Identifier |
+|------|--------|-----------|
+| `secp256k1` (default) | Native go-ethereum keystore (`UTC--...`) | Ethereum address |
+| `ed25519` | Enhanced keystore (`ed25519--{pubkey}.json`) | Public key hex |
+
+### Commands
+
+#### Create a new key
+
+```bash
+# secp256k1 (native, default)
+keystore create -d ./keystores
+
+# ed25519
+keystore create -d ./keystores --key-type ed25519 --label "my-auth-key"
+```
+
+#### Import an existing key
+
+```bash
+# From interactive input (hex)
+keystore import -d ./keystores --key-type ed25519 --format hex
+
+# From base64 input
+keystore import -d ./keystores --key-type ed25519 --format base64
+
+# From PEM file
+keystore import -d ./keystores --key-type ed25519 --format pem --from-file key.pem
+
+# secp256k1 with base64 input
+keystore import -d ./keystores --key-type secp256k1 --format base64
+```
+
+#### Export a key
+
+```bash
+# Export as hex
+keystore export -k ./keystores/ed25519--abc123.json --format hex
+
+# Export as PEM (PKCS8)
+keystore export -k ./keystores/ed25519--abc123.json --format pem
+
+# Export native keystore as base64
+keystore export -k ./keystores/UTC--2024-...--address --format base64
+```
+
+#### List, show, verify, change password
+
+```bash
+# List all keystores (native + enhanced)
+keystore list -d ./keystores
+
+# Filter by key type
+keystore list -d ./keystores --key-type ed25519
+keystore list -d ./keystores --key-type secp256k1
+
+# Show metadata without decryption
+keystore show -k ./keystores/ed25519--abc123.json
+
+# Verify password
+keystore verify -k ./keystores/ed25519--abc123.json
+
+# Change password (works with both native and enhanced)
+keystore change-password -k ./keystores/ed25519--abc123.json
+```
+
+#### HD wallet commands
+
+```bash
+keystore hdwallet create -d ./hdwallets --entropy 128
+keystore hdwallet import -d ./hdwallets
+keystore hdwallet list -d ./hdwallets
+keystore hdwallet derive -w ./hdwallets/hdwallet--0x123.json --start 0 --end 10
+keystore hdwallet export-mnemonic -w ./hdwallets/hdwallet--0x123.json
+```
+
+### Enhanced Keystore JSON Format
+
+```json
+{
+  "version": 1,
+  "key_type": "ed25519",
+  "identifier": "18088fb778ed804a9bac4e2cceb0f0fb6d2e1bb5a1871d0457f7b34a7f52755c",
+  "crypto": { "...scrypt+AES encrypted key bytes..." },
+  "label": "my-auth-key"
+}
+```
+
+### secp256k1 Curve Order Validation
+
+All key types are validated against the secp256k1 curve order N at import/create time. The probability of an ed25519 key exceeding N is negligible (~2^-128), but if it occurs the tool reports an error and the user can regenerate.
 
 ## Interfaces
 
@@ -139,10 +251,15 @@ Run the test suite:
 go test ./...
 
 # Run with timeout
-go test ./... -timeout 30s
+go test ./... -timeout 300s
 
 # Run specific package tests
-go test -v ./... -run TestKeystore
+go test -v ./keystore/ -run TestEnhanced
+go test -v ./keystore/ -run TestBackwardCompat
+
+# Run with coverage
+go test ./keystore/ -coverprofile=coverage.out
+go tool cover -func=coverage.out
 
 # Run with race detection
 go test -race ./...

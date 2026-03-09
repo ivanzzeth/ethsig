@@ -10,27 +10,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "1.0.0"
+const version = "2.0.0"
 
 var rootCmd = &cobra.Command{
 	Use:   "keystore",
-	Short: "Keystore management tool for Ethereum accounts",
-	Long: `A command-line tool for managing Ethereum keystores.
+	Short: "Keystore management tool for cryptographic keys",
+	Long: `A command-line tool for managing encrypted keystores.
 
 Supports creating new keystores, importing private keys, changing passwords,
-and listing keystores. All password input is done interactively for security.`,
+and listing keystores. Supports multiple key types (secp256k1, ed25519) and
+multiple formats (hex, base64, pem). All password input is done interactively for security.`,
 	Version: version,
 }
 
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new keystore with a randomly generated key",
-	Long: `Create a new Ethereum keystore with a randomly generated private key.
-The password will be requested interactively (typed twice for confirmation).`,
+	Long: `Create a new encrypted keystore with a randomly generated private key.
+The password will be requested interactively (typed twice for confirmation).
+
+Use --key-type to specify the key type (default: secp256k1).
+For non-secp256k1 keys, use --label to tag the keystore.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := cmd.Flags().GetString("dir")
 		if err != nil {
 			return fmt.Errorf("failed to get dir flag: %w", err)
+		}
+
+		keyType, err := cmd.Flags().GetString("key-type")
+		if err != nil {
+			return fmt.Errorf("failed to get key-type flag: %w", err)
+		}
+
+		label, err := cmd.Flags().GetString("label")
+		if err != nil {
+			return fmt.Errorf("failed to get label flag: %w", err)
 		}
 
 		if !keystore.IsTerminal() {
@@ -43,14 +57,31 @@ The password will be requested interactively (typed twice for confirmation).`,
 		}
 		defer keystore.SecureZeroize(password)
 
-		address, path, err := keystore.CreateKeystore(dir, password)
-		if err != nil {
-			return fmt.Errorf("failed to create keystore: %w", err)
+		if keyType == "secp256k1" || keyType == "" {
+			// Native go-ethereum keystore path
+			address, path, err := keystore.CreateKeystore(dir, password)
+			if err != nil {
+				return fmt.Errorf("failed to create keystore: %w", err)
+			}
+			fmt.Println("Keystore created successfully!")
+			fmt.Printf("  Type:    secp256k1\n")
+			fmt.Printf("  Address: %s\n", address)
+			fmt.Printf("  Path:    %s\n", path)
+		} else {
+			// Enhanced keystore path
+			identifier, path, err := keystore.CreateEnhancedKey(dir, keystore.KeyType(keyType), password, label)
+			if err != nil {
+				return fmt.Errorf("failed to create keystore: %w", err)
+			}
+			fmt.Println("Keystore created successfully!")
+			fmt.Printf("  Type:       %s\n", keyType)
+			fmt.Printf("  Identifier: %s\n", identifier)
+			fmt.Printf("  Path:       %s\n", path)
+			if label != "" {
+				fmt.Printf("  Label:      %s\n", label)
+			}
 		}
 
-		fmt.Println("Keystore created successfully!")
-		fmt.Printf("  Address: %s\n", address)
-		fmt.Printf("  Path:    %s\n", path)
 		return nil
 	},
 }
@@ -59,26 +90,62 @@ var importCmd = &cobra.Command{
 	Use:   "import",
 	Short: "Import a private key into a new keystore",
 	Long: `Import an existing private key into a new encrypted keystore.
-Both the private key and password will be requested interactively.`,
+
+For secp256k1 keys (default), uses native go-ethereum keystore format.
+For other key types (ed25519), uses enhanced keystore format.
+
+Supports multiple input formats: hex, base64, pem.
+Use --from-file to read the key from a file instead of interactive input.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := cmd.Flags().GetString("dir")
 		if err != nil {
 			return fmt.Errorf("failed to get dir flag: %w", err)
 		}
 
-		if !keystore.IsTerminal() {
-			return fmt.Errorf("this command requires interactive terminal input")
-		}
-
-		fmt.Print("Enter private key (hex, will not echo): ")
-		privateKey, err := keystore.ReadSecret(cmd.Context())
+		keyType, err := cmd.Flags().GetString("key-type")
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get key-type flag: %w", err)
 		}
-		defer keystore.SecureZeroize(privateKey)
 
-		if len(privateKey) == 0 {
+		format, err := cmd.Flags().GetString("format")
+		if err != nil {
+			return fmt.Errorf("failed to get format flag: %w", err)
+		}
+
+		fromFile, err := cmd.Flags().GetString("from-file")
+		if err != nil {
+			return fmt.Errorf("failed to get from-file flag: %w", err)
+		}
+
+		label, err := cmd.Flags().GetString("label")
+		if err != nil {
+			return fmt.Errorf("failed to get label flag: %w", err)
+		}
+
+		var privateKeyInput []byte
+		if fromFile != "" {
+			privateKeyInput, err = os.ReadFile(fromFile)
+			if err != nil {
+				return fmt.Errorf("failed to read key file: %w", err)
+			}
+		} else {
+			if !keystore.IsTerminal() {
+				return fmt.Errorf("this command requires interactive terminal input (or use --from-file)")
+			}
+			fmt.Printf("Enter private key (%s, will not echo): ", format)
+			privateKeyInput, err = keystore.ReadSecret(cmd.Context())
+			if err != nil {
+				return err
+			}
+		}
+		defer keystore.SecureZeroize(privateKeyInput)
+
+		if len(privateKeyInput) == 0 {
 			return fmt.Errorf("private key cannot be empty")
+		}
+
+		if !keystore.IsTerminal() {
+			return fmt.Errorf("this command requires interactive terminal input for password")
 		}
 
 		password, err := keystore.ReadPasswordWithConfirm(cmd.Context(), "Enter password for keystore")
@@ -87,14 +154,111 @@ Both the private key and password will be requested interactively.`,
 		}
 		defer keystore.SecureZeroize(password)
 
-		address, path, err := keystore.ImportPrivateKey(dir, privateKey, password)
-		if err != nil {
-			return fmt.Errorf("failed to import key: %w", err)
+		if keyType == "secp256k1" {
+			// Native path: parse format first, then convert to hex for ImportPrivateKey
+			var keyBytes []byte
+			if format == "hex" {
+				keyBytes = privateKeyInput
+			} else {
+				parsed, err := keystore.ParseKeyInput(privateKeyInput, keystore.KeyFormat(format), keystore.KeyTypeSecp256k1)
+				if err != nil {
+					return fmt.Errorf("failed to parse key: %w", err)
+				}
+				defer keystore.SecureZeroize(parsed)
+				hexStr := fmt.Sprintf("%x", parsed)
+				keyBytes = []byte(hexStr)
+			}
+
+			address, path, err := keystore.ImportPrivateKey(dir, keyBytes, password)
+			if err != nil {
+				return fmt.Errorf("failed to import key: %w", err)
+			}
+
+			fmt.Println("Private key imported successfully!")
+			fmt.Printf("  Type:    secp256k1\n")
+			fmt.Printf("  Address: %s\n", address)
+			fmt.Printf("  Path:    %s\n", path)
+		} else {
+			// Enhanced path
+			identifier, path, err := keystore.ImportEnhancedKey(
+				dir, privateKeyInput, keystore.KeyType(keyType),
+				keystore.KeyFormat(format), password, label,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to import key: %w", err)
+			}
+
+			fmt.Println("Private key imported successfully!")
+			fmt.Printf("  Type:       %s\n", keyType)
+			fmt.Printf("  Identifier: %s\n", identifier)
+			fmt.Printf("  Path:       %s\n", path)
+			if label != "" {
+				fmt.Printf("  Label:      %s\n", label)
+			}
 		}
 
-		fmt.Println("Private key imported successfully!")
-		fmt.Printf("  Address: %s\n", address)
-		fmt.Printf("  Path:    %s\n", path)
+		return nil
+	},
+}
+
+var exportCmd = &cobra.Command{
+	Use:   "export",
+	Short: "Export a private key from a keystore",
+	Long: `Decrypt a keystore and export the private key in the specified format.
+
+Works with both native go-ethereum keystores and enhanced keystores.
+WARNING: The exported key gives full access. Handle with care.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		keystorePath, err := cmd.Flags().GetString("keystore")
+		if err != nil {
+			return fmt.Errorf("failed to get keystore flag: %w", err)
+		}
+
+		format, err := cmd.Flags().GetString("format")
+		if err != nil {
+			return fmt.Errorf("failed to get format flag: %w", err)
+		}
+
+		if !keystore.IsTerminal() {
+			return fmt.Errorf("this command requires interactive terminal input")
+		}
+
+		fmt.Print("Type 'yes' to confirm key export: ")
+		reader := bufio.NewReader(os.Stdin)
+		confirmation, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read confirmation: %w", err)
+		}
+		if strings.TrimSpace(confirmation) != "yes" {
+			return fmt.Errorf("export cancelled")
+		}
+
+		fmt.Print("Enter password: ")
+		password, err := keystore.ReadSecret(cmd.Context())
+		if err != nil {
+			return err
+		}
+		defer keystore.SecureZeroize(password)
+
+		var output []byte
+		if keystore.IsEnhancedKeyFile(keystorePath) {
+			output, err = keystore.ExportEnhancedKey(keystorePath, password, keystore.KeyFormat(format))
+		} else {
+			// Native keystore: export raw bytes then format
+			rawBytes, exportErr := keystore.ExportNativeKey(keystorePath, password)
+			if exportErr != nil {
+				return fmt.Errorf("failed to export key: %w", exportErr)
+			}
+			defer keystore.SecureZeroize(rawBytes)
+			output, err = keystore.FormatKeyOutput(rawBytes, keystore.KeyFormat(format), keystore.KeyTypeSecp256k1)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to export key: %w", err)
+		}
+		defer keystore.SecureZeroize(output)
+
+		fmt.Println("\nPrivate key:")
+		fmt.Println(string(output))
 		return nil
 	},
 }
@@ -103,6 +267,7 @@ var changePasswordCmd = &cobra.Command{
 	Use:   "change-password",
 	Short: "Change the password of an existing keystore",
 	Long: `Change the password of an existing keystore file.
+Works with both native go-ethereum keystores and enhanced keystores.
 Both current and new passwords will be requested interactively.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		keystorePath, err := cmd.Flags().GetString("keystore")
@@ -114,12 +279,21 @@ Both current and new passwords will be requested interactively.`,
 			return fmt.Errorf("this command requires interactive terminal input")
 		}
 
-		// Show the address being modified
-		address, err := keystore.GetKeystoreAddress(keystorePath)
-		if err != nil {
-			return fmt.Errorf("failed to read keystore: %w", err)
+		isEnhanced := keystore.IsEnhancedKeyFile(keystorePath)
+
+		if isEnhanced {
+			info, err := keystore.GetEnhancedKeyInfo(keystorePath)
+			if err != nil {
+				return fmt.Errorf("failed to read keystore: %w", err)
+			}
+			fmt.Printf("Changing password for %s key: %s\n", info.KeyType, info.Identifier)
+		} else {
+			address, err := keystore.GetKeystoreAddress(keystorePath)
+			if err != nil {
+				return fmt.Errorf("failed to read keystore: %w", err)
+			}
+			fmt.Printf("Changing password for keystore: %s\n", address)
 		}
-		fmt.Printf("Changing password for keystore: %s\n", address)
 
 		fmt.Print("Enter current password: ")
 		currentPassword, err := keystore.ReadSecret(cmd.Context())
@@ -134,7 +308,12 @@ Both current and new passwords will be requested interactively.`,
 		}
 		defer keystore.SecureZeroize(newPassword)
 
-		if err := keystore.ChangePassword(keystorePath, currentPassword, newPassword); err != nil {
+		if isEnhanced {
+			err = keystore.ChangeEnhancedKeyPassword(keystorePath, currentPassword, newPassword)
+		} else {
+			err = keystore.ChangePassword(keystorePath, currentPassword, newPassword)
+		}
+		if err != nil {
 			return fmt.Errorf("failed to change password: %w", err)
 		}
 
@@ -146,27 +325,74 @@ Both current and new passwords will be requested interactively.`,
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all keystores in a directory",
-	Long:  `List all Ethereum keystore files in the specified directory.`,
+	Long: `List all keystore files in the specified directory.
+Use --key-type to filter by key type (e.g., secp256k1, ed25519).
+Without --key-type, all keystores are listed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := cmd.Flags().GetString("dir")
 		if err != nil {
 			return fmt.Errorf("failed to get dir flag: %w", err)
 		}
 
-		keystores, err := keystore.ListKeystores(dir)
+		filterType, err := cmd.Flags().GetString("key-type")
 		if err != nil {
-			return fmt.Errorf("failed to list keystores: %w", err)
+			return fmt.Errorf("failed to get key-type flag: %w", err)
 		}
 
-		if len(keystores) == 0 {
-			fmt.Println("No keystores found in", dir)
+		showNative := filterType == "" || filterType == "secp256k1"
+		showEnhanced := filterType == "" || (filterType != "" && filterType != "secp256k1")
+
+		var nativeKeystores []keystore.KeystoreInfo
+		if showNative {
+			nativeKeystores, err = keystore.ListKeystores(dir)
+			if err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to list native keystores: %w", err)
+			}
+		}
+
+		var enhancedKeys []keystore.EnhancedKeyInfo
+		if showEnhanced {
+			allEnhanced, listErr := keystore.ListEnhancedKeys(dir)
+			if listErr != nil && !os.IsNotExist(listErr) {
+				return fmt.Errorf("failed to list enhanced keystores: %w", listErr)
+			}
+			if filterType != "" && filterType != "secp256k1" {
+				for _, ek := range allEnhanced {
+					if string(ek.KeyType) == filterType {
+						enhancedKeys = append(enhancedKeys, ek)
+					}
+				}
+			} else {
+				enhancedKeys = allEnhanced
+			}
+		}
+
+		total := len(nativeKeystores) + len(enhancedKeys)
+		if total == 0 {
+			if filterType != "" {
+				fmt.Printf("No %s keystores found in %s\n", filterType, dir)
+			} else {
+				fmt.Println("No keystores found in", dir)
+			}
 			return nil
 		}
 
-		fmt.Printf("Found %d keystore(s) in %s:\n\n", len(keystores), dir)
-		for i, ks := range keystores {
-			fmt.Printf("%d. %s\n", i+1, ks.Address)
+		fmt.Printf("Found %d keystore(s) in %s:\n\n", total, dir)
+
+		idx := 1
+		for _, ks := range nativeKeystores {
+			fmt.Printf("%d. [secp256k1] %s\n", idx, ks.Address)
 			fmt.Printf("   Path: %s\n\n", ks.Path)
+			idx++
+		}
+
+		for _, ek := range enhancedKeys {
+			fmt.Printf("%d. [%s] %s\n", idx, ek.KeyType, ek.Identifier)
+			if ek.Label != "" {
+				fmt.Printf("   Label: %s\n", ek.Label)
+			}
+			fmt.Printf("   Path:  %s\n\n", ek.Path)
+			idx++
 		}
 		return nil
 	},
@@ -174,21 +400,35 @@ var listCmd = &cobra.Command{
 
 var showCmd = &cobra.Command{
 	Use:   "show",
-	Short: "Show the address of a keystore",
-	Long:  `Display the Ethereum address contained in a keystore file.`,
+	Short: "Show the metadata of a keystore",
+	Long:  `Display the metadata contained in a keystore file (address, key type, label).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		keystorePath, err := cmd.Flags().GetString("keystore")
 		if err != nil {
 			return fmt.Errorf("failed to get keystore flag: %w", err)
 		}
 
-		address, err := keystore.GetKeystoreAddress(keystorePath)
-		if err != nil {
-			return fmt.Errorf("failed to read keystore: %w", err)
+		if keystore.IsEnhancedKeyFile(keystorePath) {
+			info, err := keystore.GetEnhancedKeyInfo(keystorePath)
+			if err != nil {
+				return fmt.Errorf("failed to read keystore: %w", err)
+			}
+			fmt.Printf("Type:       %s\n", info.KeyType)
+			fmt.Printf("Identifier: %s\n", info.Identifier)
+			if info.Label != "" {
+				fmt.Printf("Label:      %s\n", info.Label)
+			}
+			fmt.Printf("Path:       %s\n", info.Path)
+		} else {
+			address, err := keystore.GetKeystoreAddress(keystorePath)
+			if err != nil {
+				return fmt.Errorf("failed to read keystore: %w", err)
+			}
+			fmt.Printf("Type:    secp256k1\n")
+			fmt.Printf("Address: %s\n", address)
+			fmt.Printf("Path:    %s\n", keystorePath)
 		}
 
-		fmt.Printf("Address: %s\n", address)
-		fmt.Printf("Path:    %s\n", keystorePath)
 		return nil
 	},
 }
@@ -197,7 +437,7 @@ var verifyCmd = &cobra.Command{
 	Use:   "verify",
 	Short: "Verify the password of a keystore",
 	Long: `Verify that a password can decrypt a keystore file.
-This is useful for testing if you remember the correct password.`,
+Works with both native go-ethereum keystores and enhanced keystores.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		keystorePath, err := cmd.Flags().GetString("keystore")
 		if err != nil {
@@ -208,11 +448,21 @@ This is useful for testing if you remember the correct password.`,
 			return fmt.Errorf("this command requires interactive terminal input")
 		}
 
-		address, err := keystore.GetKeystoreAddress(keystorePath)
-		if err != nil {
-			return fmt.Errorf("failed to read keystore: %w", err)
+		isEnhanced := keystore.IsEnhancedKeyFile(keystorePath)
+
+		if isEnhanced {
+			info, err := keystore.GetEnhancedKeyInfo(keystorePath)
+			if err != nil {
+				return fmt.Errorf("failed to read keystore: %w", err)
+			}
+			fmt.Printf("Verifying password for %s key: %s\n", info.KeyType, info.Identifier)
+		} else {
+			address, err := keystore.GetKeystoreAddress(keystorePath)
+			if err != nil {
+				return fmt.Errorf("failed to read keystore: %w", err)
+			}
+			fmt.Printf("Verifying password for: %s\n", address)
 		}
-		fmt.Printf("Verifying password for: %s\n", address)
 
 		fmt.Print("Enter password: ")
 		password, err := keystore.ReadSecret(cmd.Context())
@@ -221,7 +471,12 @@ This is useful for testing if you remember the correct password.`,
 		}
 		defer keystore.SecureZeroize(password)
 
-		if err := keystore.VerifyPassword(keystorePath, password); err != nil {
+		if isEnhanced {
+			err = keystore.VerifyEnhancedKeyPassword(keystorePath, password)
+		} else {
+			err = keystore.VerifyPassword(keystorePath, password)
+		}
+		if err != nil {
 			return fmt.Errorf("password verification failed: %w", err)
 		}
 
@@ -513,12 +768,25 @@ func init() {
 	if err := createCmd.MarkFlagRequired("dir"); err != nil {
 		panic(err)
 	}
+	createCmd.Flags().String("key-type", "secp256k1", "Key type: secp256k1, ed25519")
+	createCmd.Flags().String("label", "", "Label for the keystore (enhanced keystores only)")
 
 	// Import command flags
 	importCmd.Flags().StringP("dir", "d", "./keystores", "Directory to store the keystore")
 	if err := importCmd.MarkFlagRequired("dir"); err != nil {
 		panic(err)
 	}
+	importCmd.Flags().String("key-type", "secp256k1", "Key type: secp256k1, ed25519")
+	importCmd.Flags().String("format", "hex", "Input format: hex, base64, pem")
+	importCmd.Flags().String("from-file", "", "Read key from file instead of interactive input")
+	importCmd.Flags().String("label", "", "Label for the keystore (enhanced keystores only)")
+
+	// Export command flags
+	exportCmd.Flags().StringP("keystore", "k", "", "Path to keystore file")
+	if err := exportCmd.MarkFlagRequired("keystore"); err != nil {
+		panic(err)
+	}
+	exportCmd.Flags().String("format", "hex", "Output format: hex, base64, pem")
 
 	// Change password command flags
 	changePasswordCmd.Flags().StringP("keystore", "k", "", "Path to keystore file")
@@ -531,6 +799,7 @@ func init() {
 	if err := listCmd.MarkFlagRequired("dir"); err != nil {
 		panic(err)
 	}
+	listCmd.Flags().String("key-type", "", "Filter by key type: secp256k1, ed25519 (empty = all)")
 
 	// Show command flags
 	showCmd.Flags().StringP("keystore", "k", "", "Path to keystore file")
@@ -586,6 +855,7 @@ func init() {
 	// Add commands to root
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(changePasswordCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
