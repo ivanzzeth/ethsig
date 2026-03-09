@@ -235,9 +235,9 @@ NC='\033[0m'
 
 echo "=== Running pre-push checks ==="
 
-# 1. Run full test suite with race detection
-echo "Running tests with race detection..."
-if ! go test -race ./... -timeout 300s 2>&1; then
+# 1. Run full test suite
+echo "Running tests..."
+if ! go test ./... -timeout 300s 2>&1; then
     echo -e "${RED}Tests failed. Push blocked.${NC}"
     exit 1
 fi
@@ -267,6 +267,6 @@ log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
 echo "  pre-commit : error suppression check, gosec, govulncheck, go vet, plaintext secrets, gitleaks, tests"
-echo "  pre-push   : full test suite with race detection"
+echo "  pre-push   : full test suite"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"

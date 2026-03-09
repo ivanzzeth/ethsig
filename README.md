@@ -289,7 +289,7 @@ Install pre-commit and pre-push security hooks:
 - Full test suite
 
 **Pre-push checks:**
-- Full test suite with race detection (`go test -race ./...`)
+- Full test suite
 
 ### Security Audit
 

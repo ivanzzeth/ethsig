@@ -22,8 +22,13 @@ const (
 	hdwalletFileSuffix = ".json"
 	defaultBasePath    = "m/44'/60'/0'/0"
 	defaultLocale      = "en"
-	defaultScryptN     = keystore.StandardScryptN
-	defaultScryptP     = keystore.StandardScryptP
+)
+
+// defaultScryptN and defaultScryptP control scrypt encryption strength.
+// Use StandardScrypt values in production; tests may override with LightScrypt.
+var (
+	defaultScryptN = keystore.StandardScryptN
+	defaultScryptP = keystore.StandardScryptP
 )
 
 // HDWalletFile represents the encrypted HD wallet file on disk.
