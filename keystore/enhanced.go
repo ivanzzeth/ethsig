@@ -45,7 +45,13 @@ const (
 )
 
 // secp256k1N is the order of the secp256k1 curve.
-var secp256k1N, _ = new(big.Int).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+var secp256k1N = func() *big.Int {
+	n, ok := new(big.Int).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+	if !ok {
+		panic("failed to parse secp256k1 curve order")
+	}
+	return n
+}()
 
 // p256N is the order of the P-256 (secp256r1) curve.
 var p256N = elliptic.P256().Params().N
@@ -560,6 +566,10 @@ func readEnhancedKeyFile(filePath string) (*EnhancedKeyFile, error) {
 			return nil, fmt.Errorf("enhanced key file not found: %s", filePath)
 		}
 		return nil, fmt.Errorf("failed to read key file: %w", err)
+	}
+
+	if !json.Valid(data) {
+		return nil, fmt.Errorf("file is not valid JSON: %s", filePath)
 	}
 
 	var kf EnhancedKeyFile

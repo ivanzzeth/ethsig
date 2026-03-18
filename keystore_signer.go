@@ -147,7 +147,10 @@ func NewKeystoreSignerFromPath(keystorePath string, address common.Address, pass
 		keystoreDir = filepath.Dir(keystorePath)
 	}
 
-	// Create a keystore instance
+	// Create a keystore instance.
+	// Note: go-ethereum's NewKeyStore scans all files in the directory and may log
+	// DEBUG messages for non-keystore files. This is cosmetic and does not affect
+	// functionality. Use NewSafeKeyStore for environments with untrusted files.
 	ks := keystore.NewKeyStore(keystoreDir, scryptConfig.N, scryptConfig.P)
 
 	// Use the main constructor

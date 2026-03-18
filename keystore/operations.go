@@ -181,6 +181,11 @@ func ListKeystores(dir string) ([]KeystoreInfo, error) {
 			continue // Skip unreadable files
 		}
 
+		// Skip non-JSON files to prevent unmarshal issues with malformed data
+		if !json.Valid(keyjson) {
+			continue
+		}
+
 		// Try to parse as keystore
 		var keystoreFile struct {
 			Address string `json:"address"`
@@ -221,6 +226,10 @@ func GetKeystoreAddress(keystorePath string) (string, error) {
 	keyjson, err := os.ReadFile(keystorePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read keystore: %w", err)
+	}
+
+	if !json.Valid(keyjson) {
+		return "", fmt.Errorf("keystore file is not valid JSON: %s", keystorePath)
 	}
 
 	var keystoreFile struct {
@@ -273,6 +282,47 @@ func VerifyPassword(keystorePath string, password []byte) error {
 	zeroPrivateKey(key.PrivateKey)
 
 	return nil
+}
+
+// NewSafeKeyStore creates a go-ethereum KeyStore that only sees valid JSON keystore files.
+// go-ethereum's keystore.NewKeyStore scans all files in a directory and logs errors
+// for any non-keystore file. This function creates a temporary directory with symlinks
+// to only valid keystore JSON files, preventing errors from malformed or malicious files.
+//
+// The caller should call cleanup() when the KeyStore is no longer needed to remove
+// the temporary directory.
+func NewSafeKeyStore(dir string, scryptN, scryptP int) (ks *keystore.KeyStore, cleanup func(), err error) {
+	tmpDir, err := os.MkdirTemp("", "ethsig-ks-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, nil, fmt.Errorf("failed to read keystore dir: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		srcPath := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			continue
+		}
+		if !json.Valid(data) {
+			continue
+		}
+		// Symlink valid JSON files so go-ethereum can read them
+		dstPath := filepath.Join(tmpDir, entry.Name())
+		if err := os.Symlink(srcPath, dstPath); err != nil {
+			continue
+		}
+	}
+
+	return keystore.NewKeyStore(tmpDir, scryptN, scryptP), func() { os.RemoveAll(tmpDir) }, nil
 }
 
 // zeroPrivateKey zeros out a private key in memory
