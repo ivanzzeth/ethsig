@@ -163,6 +163,88 @@ func DenormalizeV(v uint8) uint8 {
 	return v
 }
 
+// NormalizeRecoveryID extracts the recovery ID (0 or 1) from a raw V value
+// returned by go-ethereum's RawSignatureValues(), which varies by transaction type:
+//   - Modern tx (EIP-1559, EIP-2930): V = 0 or 1 (already the recovery ID)
+//   - Legacy pre-EIP-155: V = 27 or 28 (recovery_id = V - 27)
+//   - Legacy EIP-155: V = recovery_id + 35 + chainID*2 (recovery_id = V - 35 - chainID*2)
+//
+// The chainID parameter is required to correctly decode EIP-155 V values.
+// Pass nil for chainID if the transaction is not EIP-155 (modern or pre-EIP-155).
+//
+// Returns an error if the computed recovery ID is not 0 or 1.
+func NormalizeRecoveryID(v *big.Int, chainID *big.Int) (byte, error) {
+	if v == nil {
+		return 0, NewSignatureError("V value is nil", nil)
+	}
+
+	vUint64 := v.Uint64()
+
+	// Modern tx types (EIP-1559, EIP-2930): V is already 0 or 1
+	if vUint64 == 0 || vUint64 == 1 {
+		return byte(vUint64), nil
+	}
+
+	// Legacy pre-EIP-155: V = 27 or 28
+	if vUint64 == 27 || vUint64 == 28 {
+		return byte(vUint64 - 27), nil
+	}
+
+	// Legacy EIP-155: V = recovery_id + 35 + chainID*2
+	// recovery_id = V - 35 - chainID*2
+	if chainID != nil && chainID.Sign() > 0 {
+		// chainID*2
+		chainIDMul := new(big.Int).Mul(chainID, big.NewInt(2))
+		// V - chainID*2
+		result := new(big.Int).Sub(v, chainIDMul)
+		// V - chainID*2 - 35
+		result.Sub(result, big.NewInt(35))
+
+		if result.Sign() >= 0 && result.IsUint64() {
+			recoveryID := result.Uint64()
+			if recoveryID == 0 || recoveryID == 1 {
+				return byte(recoveryID), nil
+			}
+		}
+	}
+
+	return 0, NewSignatureError(
+		fmt.Sprintf("unable to normalize V value %s to recovery ID", v.String()),
+		nil,
+	)
+}
+
+// EncodeSignature encodes R, S, V components (as *big.Int) into a 65-byte signature.
+// The V value is normalized to a recovery ID (0 or 1) using NormalizeRecoveryID.
+// Pass nil for chainID if the transaction is not EIP-155.
+func EncodeSignature(r, s, v *big.Int, chainID *big.Int) ([]byte, error) {
+	if r == nil || s == nil || v == nil {
+		return nil, NewSignatureError("r, s, and v must not be nil", nil)
+	}
+
+	recoveryID, err := NormalizeRecoveryID(v, chainID)
+	if err != nil {
+		return nil, err
+	}
+
+	sig := make([]byte, 65)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+
+	if len(rBytes) > 32 {
+		return nil, NewSignatureError("R value exceeds 32 bytes", nil)
+	}
+	if len(sBytes) > 32 {
+		return nil, NewSignatureError("S value exceeds 32 bytes", nil)
+	}
+
+	copy(sig[32-len(rBytes):32], rBytes)
+	copy(sig[64-len(sBytes):64], sBytes)
+	sig[64] = recoveryID
+
+	return sig, nil
+}
+
 // RSVToStruct converts R, S, V byte arrays to an RSV struct
 func RSVToStruct(r [32]byte, s [32]byte, v uint8) RSV {
 	return RSV{

@@ -219,6 +219,130 @@ func TestInvalidSignatureLength(t *testing.T) {
 	}
 }
 
+func TestNormalizeRecoveryID(t *testing.T) {
+	tests := []struct {
+		name     string
+		v        *big.Int
+		chainID  *big.Int
+		expected byte
+		wantErr  bool
+	}{
+		// Modern tx types (EIP-1559, EIP-2930): V = 0 or 1
+		{name: "modern V=0", v: big.NewInt(0), chainID: nil, expected: 0},
+		{name: "modern V=1", v: big.NewInt(1), chainID: nil, expected: 1},
+		{name: "modern V=0 with chainID", v: big.NewInt(0), chainID: big.NewInt(1), expected: 0},
+		{name: "modern V=1 with chainID", v: big.NewInt(1), chainID: big.NewInt(137), expected: 1},
+
+		// Legacy pre-EIP-155: V = 27 or 28
+		{name: "pre-EIP-155 V=27", v: big.NewInt(27), chainID: nil, expected: 0},
+		{name: "pre-EIP-155 V=28", v: big.NewInt(28), chainID: nil, expected: 1},
+		{name: "pre-EIP-155 V=27 with chainID", v: big.NewInt(27), chainID: big.NewInt(1), expected: 0},
+		{name: "pre-EIP-155 V=28 with chainID", v: big.NewInt(28), chainID: big.NewInt(1), expected: 1},
+
+		// Legacy EIP-155 with chainID=1: V = recovery_id + 35 + 1*2 = recovery_id + 37
+		{name: "EIP-155 chainID=1 V=37 (recovery=0)", v: big.NewInt(37), chainID: big.NewInt(1), expected: 0},
+		{name: "EIP-155 chainID=1 V=38 (recovery=1)", v: big.NewInt(38), chainID: big.NewInt(1), expected: 1},
+
+		// Legacy EIP-155 with chainID=137: V = recovery_id + 35 + 137*2 = recovery_id + 309
+		{name: "EIP-155 chainID=137 V=309 (recovery=0)", v: big.NewInt(309), chainID: big.NewInt(137), expected: 0},
+		{name: "EIP-155 chainID=137 V=310 (recovery=1)", v: big.NewInt(310), chainID: big.NewInt(137), expected: 1},
+
+		// Legacy EIP-155 with chainID=56 (BSC): V = recovery_id + 35 + 56*2 = recovery_id + 147
+		{name: "EIP-155 chainID=56 V=147 (recovery=0)", v: big.NewInt(147), chainID: big.NewInt(56), expected: 0},
+		{name: "EIP-155 chainID=56 V=148 (recovery=1)", v: big.NewInt(148), chainID: big.NewInt(56), expected: 1},
+
+		// Error cases
+		{name: "nil V", v: nil, chainID: nil, expected: 0, wantErr: true},
+		{name: "invalid V without chainID", v: big.NewInt(37), chainID: nil, expected: 0, wantErr: true},
+		{name: "invalid V=99 with chainID=1", v: big.NewInt(99), chainID: big.NewInt(1), expected: 0, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := NormalizeRecoveryID(tt.v, tt.chainID)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("NormalizeRecoveryID() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeRecoveryID() unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("NormalizeRecoveryID() = %d, expected %d", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEncodeSignature(t *testing.T) {
+	r := new(big.Int)
+	r.SetString("4fde044566e1288a60cebbc94458b2da86940d78ea2a92a993232726fb2ce78f", 16)
+	s := new(big.Int)
+	s.SetString("797aef5eb003a2ca56ffec9e9cefe28f5666c352da36306c8ab807ac02d2f244", 16)
+
+	tests := []struct {
+		name       string
+		r          *big.Int
+		s          *big.Int
+		v          *big.Int
+		chainID    *big.Int
+		expectedV  byte
+		wantErr    bool
+	}{
+		{name: "modern V=0", r: r, s: s, v: big.NewInt(0), chainID: nil, expectedV: 0},
+		{name: "modern V=1", r: r, s: s, v: big.NewInt(1), chainID: nil, expectedV: 1},
+		{name: "pre-EIP-155 V=27", r: r, s: s, v: big.NewInt(27), chainID: nil, expectedV: 0},
+		{name: "pre-EIP-155 V=28", r: r, s: s, v: big.NewInt(28), chainID: nil, expectedV: 1},
+		{name: "EIP-155 chainID=1 V=37", r: r, s: s, v: big.NewInt(37), chainID: big.NewInt(1), expectedV: 0},
+		{name: "EIP-155 chainID=1 V=38", r: r, s: s, v: big.NewInt(38), chainID: big.NewInt(1), expectedV: 1},
+		{name: "EIP-155 chainID=137 V=309", r: r, s: s, v: big.NewInt(309), chainID: big.NewInt(137), expectedV: 0},
+		{name: "EIP-155 chainID=137 V=310", r: r, s: s, v: big.NewInt(310), chainID: big.NewInt(137), expectedV: 1},
+		{name: "nil r", r: nil, s: s, v: big.NewInt(0), chainID: nil, wantErr: true},
+		{name: "nil s", r: r, s: nil, v: big.NewInt(0), chainID: nil, wantErr: true},
+		{name: "nil v", r: r, s: s, v: nil, chainID: nil, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sig, err := EncodeSignature(tt.r, tt.s, tt.v, tt.chainID)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("EncodeSignature() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("EncodeSignature() unexpected error: %v", err)
+			}
+			if len(sig) != 65 {
+				t.Fatalf("EncodeSignature() signature length = %d, expected 65", len(sig))
+			}
+			// Check recovery ID byte
+			if sig[64] != tt.expectedV {
+				t.Errorf("EncodeSignature() V byte = %d, expected %d", sig[64], tt.expectedV)
+			}
+			// Check R bytes are correctly placed
+			rBytes := tt.r.Bytes()
+			for i, b := range rBytes {
+				if sig[32-len(rBytes)+i] != b {
+					t.Errorf("EncodeSignature() R byte mismatch at position %d", i)
+					break
+				}
+			}
+			// Check S bytes are correctly placed
+			sBytes := tt.s.Bytes()
+			for i, b := range sBytes {
+				if sig[64-len(sBytes)+i] != b {
+					t.Errorf("EncodeSignature() S byte mismatch at position %d", i)
+					break
+				}
+			}
+		})
+	}
+}
+
 func TestVNormalization(t *testing.T) {
 	// Test signature with V = 0 (should be normalized to 27)
 	sigHex := "4fde044566e1288a60cebbc94458b2da86940d78ea2a92a993232726fb2ce78f797aef5eb003a2ca56ffec9e9cefe28f5666c352da36306c8ab807ac02d2f24400"
