@@ -62,7 +62,10 @@ func ReadSecret(ctx context.Context) ([]byte, error) {
 		//     inside term.ReadPassword, so the goroutine can finish.
 		//  3. Wait for the goroutine to send its result, preventing a leak.
 		_ = term.Restore(fd, oldState)
-		_, _ = syscall.Write(fd, []byte("\n"))
+		// stdin write to unblock the read in raw mode is platform-specific
+		// (Unix int fd vs Windows syscall.Handle); writeStdin is supplied
+		// per-platform in stdin_write_{unix,windows}.go.
+		_ = writeStdin(fd, []byte("\n"))
 		<-resultCh
 		return nil, fmt.Errorf("%w: %v", ErrContextCanceled, ctx.Err())
 
