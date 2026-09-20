@@ -6,7 +6,8 @@ A comprehensive Ethereum signature library for Go, providing secure signing oper
 
 - **Multiple Signer Types**
   - Private key-based signing (`EthPrivateKeySigner`)
-  - Keystore file-based signing (`KeystoreSigner`)
+  - Keystore file-based signing (`KeystoreSigner`), optionally holding the key
+    unlocked for repeated signing (`WithKeyHeldUnlocked`)
   - Configurable scrypt parameters for keystore encryption
 
 - **Signing Standards Support**
@@ -48,6 +49,48 @@ See [examples/keystore_signer/main.go](examples/keystore_signer/main.go) for a c
 ### Custom Scrypt Configuration
 
 See [examples/custom_scrypt_config/main.go](examples/custom_scrypt_config/main.go) for a complete example.
+
+### Fast repeated signing: `WithKeyHeldUnlocked`
+
+By default a `KeystoreSigner` holds the password and derives the key again on
+**every** signature — go-ethereum's `SignHashWithPassphrase` decrypts, signs and
+wipes the key each time. That decryption is scrypt, and its cost comes from the
+`kdfparams` stored inside the keystore file (not from `KeystoreScryptConfig`,
+which only applies to files this process writes).
+
+Pass `WithKeyHeldUnlocked()` to unlock once and keep the key for the lifetime of
+the signer:
+
+```go
+signer, err := ethsig.NewKeystoreSignerFromPath(
+    path, addr, password, nil,
+    ethsig.WithKeyHeldUnlocked(),
+)
+defer signer.Close() // relocks the account
+```
+
+Per signature, on an Apple M-series laptop:
+
+| `kdfparams` in the file | default | `WithKeyHeldUnlocked` |
+| --- | --- | --- |
+| `N=4096` (light) | 46 ms | 22 µs |
+| `N=262144` (standard, what most tools write) | ~500 ms | unchanged |
+
+Worth reaching for when signing sits on a path with a deadline — landing in a
+block, answering a quote — where that derivation is likely the largest single
+item on it.
+
+**The trade:** the private key stays decrypted inside the `KeyStore` until
+`Close()`. That is a real change in exposure, which is why it is opt-in rather
+than the default. In exchange the password is *not* retained, since signing no
+longer needs it.
+
+**If something else locks the KeyStore** (the `KeyStore` belongs to the caller,
+so another holder can `Lock` it), the signer returns an error naming that cause
+rather than quietly falling back to the password. Falling back would put the
+very cost this option removes back onto an unpredictable request, and an
+occasional latency cliff is harder to find than an error that says what
+happened.
 
 ## Signing Operations
 

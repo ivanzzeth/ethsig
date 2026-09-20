@@ -1,6 +1,7 @@
 package ethsig
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -55,6 +56,10 @@ type KeystoreSigner struct {
 	address  common.Address
 	account  accounts.Account
 	password *SecureBytes
+	// heldUnlocked records that this signer keeps the account unlocked, so the
+	// signing calls below use the unlocked account rather than the passphrase.
+	// See WithKeyHeldUnlocked.
+	heldUnlocked bool
 }
 
 // NewKeystoreSigner creates a new KeystoreSigner from an existing KeyStore and address
@@ -81,7 +86,9 @@ type KeystoreSigner struct {
 //
 //	addr2 := common.HexToAddress("0x5678...")
 //	signer2, _ := ethsig.NewKeystoreSigner(ks, addr2, "password2")
-func NewKeystoreSigner(ks *keystore.KeyStore, address common.Address, password string) (*KeystoreSigner, error) {
+func NewKeystoreSigner(ks *keystore.KeyStore, address common.Address, password string, opts ...KeystoreOption) (*KeystoreSigner, error) {
+	o := newKeystoreOptions(opts)
+
 	account, err := ks.Find(accounts.Account{Address: address})
 	if err != nil {
 		return nil, err
@@ -92,17 +99,26 @@ func NewKeystoreSigner(ks *keystore.KeyStore, address common.Address, password s
 	if err != nil {
 		return nil, NewKeystoreError("failed to unlock account with provided password", err)
 	}
-	// Lock it again after validation
+
+	s := &KeystoreSigner{
+		keyStore:     ks,
+		address:      address,
+		account:      account,
+		heldUnlocked: o.holdKeyUnlocked,
+	}
+
+	if o.holdKeyUnlocked {
+		// Leave the account unlocked: that is the whole point of the option.
+		// The password is no longer needed — signing uses the unlocked account
+		// — so it is not kept around. Close relocks the account.
+		return s, nil
+	}
+
+	// Default: the unlock above was only a password check, so undo it. The key
+	// is re-derived on every signing call from the stored password.
 	ks.Lock(account.Address)
-
-	// Create a signer that delegates to the keystore
-
-	return &KeystoreSigner{
-		keyStore: ks,
-		address:  address,
-		account:  account,
-		password: NewSecureBytesFromString(password),
-	}, nil
+	s.password = NewSecureBytesFromString(password)
+	return s, nil
 }
 
 // NewKeystoreSignerFromPath creates a KeystoreSigner from a keystore directory/file path
@@ -122,7 +138,7 @@ func NewKeystoreSigner(ks *keystore.KeyStore, address common.Address, password s
 //
 //	addr := common.HexToAddress("0x1234...")
 //	signer, err := ethsig.NewKeystoreSignerFromPath("/path/to/keystore", addr, "password", nil)
-func NewKeystoreSignerFromPath(keystorePath string, address common.Address, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
+func NewKeystoreSignerFromPath(keystorePath string, address common.Address, password string, scryptConfig *KeystoreScryptConfig, opts ...KeystoreOption) (*KeystoreSigner, error) {
 	if keystorePath == "" {
 		return nil, NewKeystoreError("keystore path cannot be empty", nil)
 	}
@@ -154,7 +170,7 @@ func NewKeystoreSignerFromPath(keystorePath string, address common.Address, pass
 	ks := keystore.NewKeyStore(keystoreDir, scryptConfig.N, scryptConfig.P)
 
 	// Use the main constructor
-	return NewKeystoreSigner(ks, address, password)
+	return NewKeystoreSigner(ks, address, password, opts...)
 }
 
 // NewKeystoreSignerFromDirectory creates a KeystoreSigner from a directory and address
@@ -174,8 +190,8 @@ func NewKeystoreSignerFromPath(keystorePath string, address common.Address, pass
 //
 //	addr := common.HexToAddress("0x1234...")
 //	signer, err := ethsig.NewKeystoreSignerFromDirectory("/path/to/keystore", addr, "password", nil)
-func NewKeystoreSignerFromDirectory(keystoreDir string, address common.Address, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
-	return NewKeystoreSignerFromPath(keystoreDir, address, password, scryptConfig)
+func NewKeystoreSignerFromDirectory(keystoreDir string, address common.Address, password string, scryptConfig *KeystoreScryptConfig, opts ...KeystoreOption) (*KeystoreSigner, error) {
+	return NewKeystoreSignerFromPath(keystoreDir, address, password, scryptConfig, opts...)
 }
 
 // NewKeystoreSignerFromFile creates a KeystoreSigner from a specific keystore file and address
@@ -195,7 +211,7 @@ func NewKeystoreSignerFromDirectory(keystoreDir string, address common.Address, 
 //
 //	addr := common.HexToAddress("0x1234...")
 //	signer, err := ethsig.NewKeystoreSignerFromFile("/path/to/keystore/UTC--2024...", addr, "password", nil)
-func NewKeystoreSignerFromFile(keystoreFile string, address common.Address, password string, scryptConfig *KeystoreScryptConfig) (*KeystoreSigner, error) {
+func NewKeystoreSignerFromFile(keystoreFile string, address common.Address, password string, scryptConfig *KeystoreScryptConfig, opts ...KeystoreOption) (*KeystoreSigner, error) {
 	// Validate the file exists and is not a directory
 	info, err := os.Stat(keystoreFile)
 	if err != nil {
@@ -205,7 +221,7 @@ func NewKeystoreSignerFromFile(keystoreFile string, address common.Address, pass
 		return nil, NewKeystoreError("path is a directory, expected a file", nil)
 	}
 
-	return NewKeystoreSignerFromPath(keystoreFile, address, password, scryptConfig)
+	return NewKeystoreSignerFromPath(keystoreFile, address, password, scryptConfig, opts...)
 }
 
 // PersonalSign implements personal_sign (EIP-191 version 0x45)
@@ -221,7 +237,7 @@ func (s *KeystoreSigner) PersonalSign(data string) ([]byte, error) {
 	hash := crypto.Keccak256Hash(prefixedMessage)
 
 	// Sign using the keystore
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash.Bytes())
+	signature, err := s.signHash(hash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +258,7 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 
 	// For EIP-191 messages, we sign the raw message bytes
 	hash := crypto.Keccak256Hash(messageBytes)
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash.Bytes())
+	signature, err := s.signHash(hash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +271,7 @@ func (s *KeystoreSigner) SignEIP191Message(message string) ([]byte, error) {
 // SignRawMessage signs raw message bytes
 func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 	hash := crypto.Keccak256Hash(raw)
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash.Bytes())
+	signature, err := s.signHash(hash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +283,7 @@ func (s *KeystoreSigner) SignRawMessage(raw []byte) ([]byte, error) {
 
 // SignHash signs the hashed data using the private key
 func (s *KeystoreSigner) SignHash(hashedData common.Hash) ([]byte, error) {
-	signature, err := s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hashedData.Bytes())
+	signature, err := s.signHash(hashedData.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +317,45 @@ func (s *KeystoreSigner) SignTransactionWithChainID(tx *types.Transaction, chain
 		return nil, fmt.Errorf("chainID is nil")
 	}
 
+	if s.heldUnlocked {
+		signed, err := s.keyStore.SignTx(s.account, tx, chainID)
+		return signed, s.explainIfLocked(err)
+	}
 	return s.keyStore.SignTxWithPassphrase(s.account, string(s.password.Bytes()), tx, chainID)
+}
+
+// signHash is the one place that decides *how* this signer reaches the key.
+//
+// ⛔ One place on purpose: with the branch copied into each signing method, the
+// next method added would quietly get whichever half its author copied, and a
+// signer constructed WithKeyHeldUnlocked would pay the derivation again on that
+// one path only — which looks like nothing at all until someone profiles it.
+func (s *KeystoreSigner) signHash(hash []byte) ([]byte, error) {
+	if s.heldUnlocked {
+		sig, err := s.keyStore.SignHash(s.account, hash)
+		return sig, s.explainIfLocked(err)
+	}
+	return s.keyStore.SignHashWithPassphrase(s.account, string(s.password.Bytes()), hash)
+}
+
+// explainIfLocked names the cause when someone else locked the account.
+//
+// The KeyStore belongs to the caller, so another holder may Lock it. This
+// signer does not re-derive in that case (see WithKeyHeldUnlocked): re-deriving
+// would put the cost the option exists to remove back onto an unpredictable
+// request, and a latency cliff that shows up once in a while is harder to find
+// than an error that says what happened.
+func (s *KeystoreSigner) explainIfLocked(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, keystore.ErrLocked) {
+		return NewKeystoreError(
+			"account is locked, and this signer was constructed WithKeyHeldUnlocked "+
+				"so it does not hold the password to unlock it again — something else "+
+				"called Lock on this KeyStore, or Close has already run", err)
+	}
+	return err
 }
 
 // Close securely cleans up sensitive data from memory
@@ -310,6 +364,12 @@ func (s *KeystoreSigner) Close() error {
 	if s.password != nil {
 		s.password.Zeroize()
 		s.password = nil
+	}
+	// ⛔ Relock, or the decrypted key outlives the signer that owns it — and
+	// "I closed it" is exactly when a caller stops thinking about the key.
+	if s.heldUnlocked {
+		s.heldUnlocked = false
+		return s.keyStore.Lock(s.address)
 	}
 	return nil
 }
